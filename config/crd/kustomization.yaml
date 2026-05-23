@@ -4,6 +4,7 @@
 resources:
 - bases/infrastructure.cluster.x-k8s.io_stackitclusters.yaml
 - bases/infrastructure.cluster.x-k8s.io_stackitmachines.yaml
+- bases/infrastructure.cluster.x-k8s.io_stackitclustertemplates.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

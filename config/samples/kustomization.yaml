@@ -2,4 +2,5 @@
 resources:
 - infrastructure_v1alpha1_stackitcluster.yaml
 - infrastructure_v1alpha1_stackitmachine.yaml
+- infrastructure_v1alpha1_stackitclustertemplate.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

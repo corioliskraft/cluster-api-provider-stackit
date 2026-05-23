@@ -8,4 +8,14 @@ layout:
 - go.kubebuilder.io/v4
 projectName: cluster-api-provider-stackit
 repo: voigt.tngl.sh/cluster-api-provider-stackit
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: cluster.x-k8s.io
+  group: infrastructure
+  kind: StackitCluster
+  path: voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1
+  version: v1alpha1
 version: "3"

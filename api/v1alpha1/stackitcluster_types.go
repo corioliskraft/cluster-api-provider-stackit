@@ -59,7 +59,9 @@ type StackitClusterStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=stackitclusters,shortName=stic,scope=Namespaced,categories=cluster-api
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 
 // StackitCluster is the Schema for the stackitclusters API
 type StackitCluster struct {

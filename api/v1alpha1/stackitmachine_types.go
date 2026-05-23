@@ -59,7 +59,9 @@ type StackitMachineStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=stackitmachines,shortName=stim,scope=Namespaced,categories=cluster-api
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 
 // StackitMachine is the Schema for the stackitmachines API
 type StackitMachine struct {

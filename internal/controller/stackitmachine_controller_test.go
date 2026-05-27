@@ -6,79 +6,305 @@ you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 */
 
 package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	infrastructurev1alpha1 "voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1"
+	infrav1 "voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1"
+	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud"
+	cloudfake "voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud/fake"
 )
 
 var _ = Describe("StackitMachine Controller", func() {
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+	const namespace = "default"
 
-		ctx := context.Background()
+	var (
+		ctx           context.Context
+		clusterName   string
+		machineName   string
+		stackitName   string
+		credentials   string
+		fakeCloud     *cloudfake.Client
+		reconciler    *StackitMachineReconciler
+		request       reconcile.Request
+		stackitKey    types.NamespacedName
+		stackitMach   *infrav1.StackitMachine
+		bootstrapName string
+	)
 
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+	BeforeEach(func() {
+		ctx = context.Background()
+		suffix := time.Now().UnixNano()
+		clusterName = fmt.Sprintf("cluster-%d", suffix)
+		machineName = fmt.Sprintf("machine-%d", suffix)
+		stackitName = fmt.Sprintf("stackit-machine-%d", suffix)
+		credentials = "stackit-credentials-" + fmt.Sprint(suffix)
+		bootstrapName = fmt.Sprintf("bootstrap-%d", suffix)
+		stackitKey = types.NamespacedName{Namespace: namespace, Name: stackitName}
+		request = reconcile.Request{NamespacedName: stackitKey}
+		fakeCloud = cloudfake.New(cloud.Network{ID: testNetworkID, Name: "network"})
+		reconciler = &StackitMachineReconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+			CloudClientFactory: func(context.Context, cloud.Credentials) (cloud.Client, error) {
+				return fakeCloud, nil
+			},
 		}
-		stackitmachine := &infrastructurev1alpha1.StackitMachine{}
 
-		BeforeEach(func() {
-			By("creating the custom resource for the Kind StackitMachine")
-			err := k8sClient.Get(ctx, typeNamespacedName, stackitmachine)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &infrastructurev1alpha1.StackitMachine{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					// TODO(user): Specify other spec details if needed.
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
-		})
+		createCredentialsSecret(ctx, credentials, namespace, testProjectID)
+		createOwnerCluster(ctx, clusterName, namespace)
+		createReadyStackitCluster(ctx, clusterName, namespace, credentials)
+		createOwnerMachine(ctx, machineName, namespace, clusterName, stackitName, nil)
+		stackitMach = newStackitMachine(stackitName, namespace, machineName)
+		Expect(k8sClient.Create(ctx, stackitMach)).To(Succeed())
+	})
 
-		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &infrastructurev1alpha1.StackitMachine{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
+	AfterEach(func() {
+		deleteIfExists(ctx, stackitMach)
+		deleteIfExists(ctx, &clusterv1.Machine{ObjectMeta: metav1.ObjectMeta{Name: machineName, Namespace: namespace}})
+		deleteIfExists(ctx, &infrav1.StackitCluster{ObjectMeta: metav1.ObjectMeta{Name: clusterName, Namespace: namespace}})
+		deleteIfExists(ctx, &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: clusterName, Namespace: namespace}})
+		deleteIfExists(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: credentials, Namespace: namespace}})
+		deleteIfExists(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: bootstrapName, Namespace: namespace}})
+	})
 
-			By("Cleanup the specific resource instance StackitMachine")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &StackitMachineReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+	It("does not create a VM when Machine.spec.bootstrap.dataSecretName is empty", func() {
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue())
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
-		})
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Ready).To(BeFalse())
+		expectCondition(got.Status.Conditions, infrav1.MachineBootstrapReadyCondition, metav1.ConditionFalse, "BootstrapDataSecretMissing")
+	})
+
+	It("does not create a VM when the bootstrap Secret is missing", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue())
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		expectCondition(got.Status.Conditions, infrav1.MachineBootstrapReadyCondition, metav1.ConditionFalse, "BootstrapDataSecretNotFound")
+	})
+
+	It("creates a VM and sets provider status when bootstrap data is available", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+		Expect(fakeCloud.ServerCount()).To(Equal(1))
+
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Ready).To(BeTrue())
+		Expect(got.Status.InstanceID).NotTo(BeEmpty())
+		Expect(got.Status.InstanceState).To(Equal("ACTIVE"))
+		Expect(got.Status.ProviderID).To(Equal("stackit://" + got.Status.InstanceID))
+		Expect(got.Spec.ProviderID).NotTo(BeNil())
+		Expect(*got.Spec.ProviderID).To(Equal(got.Status.ProviderID))
+		Expect(got.Status.Addresses).To(HaveLen(1))
+		expectCondition(got.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionTrue, "Available")
+		expectCondition(got.Status.Conditions, infrav1.MachineBootstrapReadyCondition, metav1.ConditionTrue, "Available")
+		expectCondition(got.Status.Conditions, infrav1.MachineInstanceReadyCondition, metav1.ConditionTrue, "Available")
+	})
+
+	It("marks credentials invalid without requeueing on unauthorized credentials", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		reconciler.CloudClientFactory = func(context.Context, cloud.Credentials) (cloud.Client, error) {
+			return nil, fmt.Errorf("authenticate: %w", cloud.ErrUnauthorized)
+		}
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		expectCondition(got.Status.Conditions, infrav1.MachineCredentialsReadyCondition, metav1.ConditionFalse, "CredentialsInvalid")
+		expectCondition(got.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionFalse, "CredentialsInvalid")
+	})
+
+	It("requeues when server lookup returns a conflict", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		fakeCloud.FailNextFindServer = fmt.Errorf("multiple matching servers: %w", cloud.ErrConflict)
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue())
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		expectCondition(got.Status.Conditions, infrav1.MachineInstanceReadyCondition, metav1.ConditionFalse, "InstanceError")
+		expectCondition(got.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionFalse, "InstanceError")
+	})
+
+	It("requeues when VM creation returns a transient error", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		fakeCloud.FailNextCreateServer = fmt.Errorf("create server timeout: %w", cloud.ErrTransient)
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue())
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		expectCondition(got.Status.Conditions, infrav1.MachineInstanceReadyCondition, metav1.ConditionFalse, "InstanceError")
+		expectCondition(got.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionFalse, "InstanceError")
+	})
+
+	It("registers control plane VMs as API server load balancer targets", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		updateMachineControlPlaneLabel(ctx, machineName, namespace)
+		enableStackitClusterLoadBalancer(ctx, clusterName, namespace)
+		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+		Expect(fakeCloud.ServerCount()).To(Equal(1))
+		Expect(fakeCloud.LoadBalancerCount()).To(Equal(1))
+
+		stackitCluster := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName, Namespace: namespace}, stackitCluster)).To(Succeed())
+		loadBalancerID := stackitCluster.Status.APIServerLoadBalancerID
+		Expect(loadBalancerID).NotTo(BeEmpty())
+		Expect(fakeCloud.LoadBalancerTargetCount(loadBalancerID)).To(Equal(1))
+	})
+
+	It("requeues when load balancer target registration returns a transient error", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		updateMachineControlPlaneLabel(ctx, machineName, namespace)
+		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		loadBalancerID := createAPIServerLoadBalancer(ctx, fakeCloud)
+		updateStackitClusterLoadBalancer(ctx, clusterName, namespace, loadBalancerID)
+		fakeCloud.FailNextEnsureTarget = fmt.Errorf("update target pool timeout: %w", cloud.ErrTransient)
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue())
+
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		expectCondition(got.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionFalse, "LoadBalancerTargetError")
+	})
+
+	It("deletes the VM and removes the finalizer", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		updateMachineControlPlaneLabel(ctx, machineName, namespace)
+		enableStackitClusterLoadBalancer(ctx, clusterName, namespace)
+		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		_, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fakeCloud.ServerCount()).To(Equal(1))
+
+		stackitCluster := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName, Namespace: namespace}, stackitCluster)).To(Succeed())
+		loadBalancerID := stackitCluster.Status.APIServerLoadBalancerID
+		Expect(loadBalancerID).NotTo(BeEmpty())
+		Expect(fakeCloud.LoadBalancerTargetCount(loadBalancerID)).To(Equal(1))
+
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
+
+		_, err = reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+		Expect(fakeCloud.LoadBalancerTargetCount(loadBalancerID)).To(Equal(0))
+		Eventually(func() bool {
+			err := k8sClient.Get(ctx, stackitKey, &infrav1.StackitMachine{})
+			return apierrors.IsNotFound(err)
+		}).Should(BeTrue())
+	})
+
+	It("maps owning Machine events to StackitMachine reconcile requests", func() {
+		machine := &clusterv1.Machine{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: machineName, Namespace: namespace}, machine)).To(Succeed())
+
+		requests := reconciler.stackitMachineRequestsForMachine(ctx, machine)
+		Expect(requests).To(Equal([]reconcile.Request{request}))
+	})
+
+	It("maps related StackitCluster events to StackitMachine reconcile requests", func() {
+		stackitCluster := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName, Namespace: namespace}, stackitCluster)).To(Succeed())
+
+		requests := reconciler.stackitMachineRequestsForStackitCluster(ctx, stackitCluster)
+		Expect(requests).To(ConsistOf(request))
+	})
+
+	It("maps bootstrap Secret events to StackitMachine reconcile requests", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: bootstrapName, Namespace: namespace}}
+
+		requests := reconciler.stackitMachineRequestsForBootstrapSecret(ctx, secret)
+		Expect(requests).To(ConsistOf(request))
+	})
+
+	It("ignores Machine events for other infrastructure providers", func() {
+		machine := &clusterv1.Machine{
+			ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: namespace},
+			Spec: clusterv1.MachineSpec{
+				InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+					APIGroup: "other.infrastructure.example.com",
+					Kind:     "OtherMachine",
+					Name:     "other",
+				},
+			},
+		}
+
+		requests := reconciler.stackitMachineRequestsForMachine(ctx, machine)
+		Expect(requests).To(BeEmpty())
 	})
 })
+
+func newStackitMachine(name, namespace, machineName string) *infrav1.StackitMachine {
+	return &infrav1.StackitMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: clusterv1.GroupVersion.String(),
+				Kind:       "Machine",
+				Name:       machineName,
+				UID:        types.UID("machine-" + machineName),
+			}},
+		},
+		Spec: infrav1.StackitMachineSpec{
+			ImageID:          testImageID,
+			MachineType:      "c2i.2",
+			AvailabilityZone: "eu01-1",
+			Network: infrav1.StackitMachineNetworkSpec{
+				ID: testNetworkID,
+			},
+		},
+	}
+}

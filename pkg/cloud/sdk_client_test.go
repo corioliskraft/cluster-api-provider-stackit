@@ -1,0 +1,374 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+*/
+
+package cloud
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+)
+
+const (
+	testSDKProjectID     = "00000000-0000-0000-0000-000000000000"
+	testSDKRegion        = "eu01"
+	testSDKServerID      = "33333333-3333-4333-8333-333333333333"
+	testSDKNetworkID     = "11111111-1111-4111-8111-111111111111"
+	testSDKImageID       = "22222222-2222-4222-8222-222222222222"
+	testSDKSecurityGroup = "44444444-4444-4444-8444-444444444444"
+)
+
+func TestSDKClientCreateServerUsesExpectedPayload(t *testing.T) {
+	var createPayload map[string]interface{}
+	server := newSDKTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/servers"):
+			if got := r.URL.Query().Get("label_selector"); got != "cluster=test" {
+				t.Fatalf("label_selector = %q, want cluster=test", got)
+			}
+			if got := r.URL.Query().Get("details"); got != "true" {
+				t.Fatalf("details = %q, want true", got)
+			}
+			writeJSON(t, w, map[string]interface{}{"items": []interface{}{}})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/servers"):
+			createPayload = readJSON(t, r)
+			writeJSON(t, w, map[string]interface{}{
+				"id":          testSDKServerID,
+				"machineType": "c2i.2",
+				"name":        "node-0",
+				"status":      "ACTIVE",
+			})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/servers/"+testSDKServerID+"/nics"):
+			writeJSON(t, w, map[string]interface{}{
+				"items": []interface{}{
+					map[string]interface{}{"ipv4": "10.0.0.10", "ipv6": "fd00::10"},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+
+	client := newTestSDKClient(t, server.URL)
+	created, err := client.CreateServer(context.Background(), CreateServerInput{
+		Name:             "node-0",
+		MachineType:      "c2i.2",
+		ImageID:          testSDKImageID,
+		AvailabilityZone: "eu01-1",
+		SSHKeyName:       "default",
+		NetworkID:        testSDKNetworkID,
+		SecurityGroups:   []string{testSDKSecurityGroup},
+		UserData:         []byte("#cloud-config\n"),
+		RootVolume: RootVolumeInput{
+			SizeGiB:             50,
+			PerformanceClass:    "storage_premium_perf6",
+			DeleteOnTermination: true,
+		},
+		Tags: map[string]string{"cluster": "test"},
+	})
+	if err != nil {
+		t.Fatalf("CreateServer() error = %v", err)
+	}
+	if created.ID != testSDKServerID || created.Name != "node-0" || created.State != "ACTIVE" {
+		t.Fatalf("CreateServer() = %#v", created)
+	}
+	if len(created.Addresses) != 2 {
+		t.Fatalf("CreateServer() addresses = %#v, want two internal addresses", created.Addresses)
+	}
+
+	assertStringField(t, createPayload, "name", "node-0")
+	assertStringField(t, createPayload, "machineType", "c2i.2")
+	assertFieldAbsent(t, createPayload, "imageId")
+	assertStringField(t, createPayload, "availabilityZone", "eu01-1")
+	assertStringField(t, createPayload, "keypairName", "default")
+	assertStringField(t, createPayload, "userData", "I2Nsb3VkLWNvbmZpZwo=")
+	assertNestedStringField(t, createPayload, []string{"labels", "cluster"}, "test")
+	assertNestedStringField(t, createPayload, []string{"networking", "networkId"}, testSDKNetworkID)
+	assertNestedStringField(t, createPayload, []string{"bootVolume", "performanceClass"}, "storage_premium_perf6")
+	assertNestedStringField(t, createPayload, []string{"bootVolume", "source", "id"}, testSDKImageID)
+	assertNestedStringField(t, createPayload, []string{"bootVolume", "source", "type"}, "image")
+	assertNestedNumberField(t, createPayload, []string{"bootVolume", "size"}, 50)
+}
+
+func assertFieldAbsent(t *testing.T, payload map[string]interface{}, key string) {
+	t.Helper()
+	if _, ok := payload[key]; ok {
+		t.Fatalf("%s present in payload, want absent: %#v", key, payload[key])
+	}
+}
+
+func TestSDKClientEnsureAPIServerLoadBalancerCreatesExpectedPayload(t *testing.T) {
+	var createPayload map[string]interface{}
+	server := newSDKTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/load-balancers"):
+			writeJSON(t, w, map[string]interface{}{"loadBalancers": []interface{}{}})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/load-balancers"):
+			createPayload = readJSON(t, r)
+			writeJSON(t, w, sdkLoadBalancerJSON("apiserver-test", "203.0.113.10", []interface{}{
+				map[string]interface{}{"name": apiserverTargetPoolName, "targetPort": 6443, "targets": []interface{}{
+					map[string]interface{}{"displayName": "cp-0", "ip": "10.0.0.10"},
+				}},
+			}))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+
+	client := newTestSDKClient(t, server.URL)
+	loadBalancer, err := client.EnsureAPIServerLoadBalancer(context.Background(), LoadBalancerInput{
+		Name:      "apiserver-test",
+		Region:    testSDKRegion,
+		NetworkID: testSDKNetworkID,
+		Port:      6443,
+		Targets: []LoadBalancerTargetInput{{
+			Name: "cp-0",
+			IP:   "10.0.0.10",
+		}},
+		Tags: map[string]string{"cluster": "test"},
+	})
+	if err != nil {
+		t.Fatalf("EnsureAPIServerLoadBalancer() error = %v", err)
+	}
+	if loadBalancer.ID != "apiserver-test" || loadBalancer.IP != "203.0.113.10" || loadBalancer.Port != 6443 {
+		t.Fatalf("EnsureAPIServerLoadBalancer() = %#v", loadBalancer)
+	}
+
+	assertStringField(t, createPayload, "name", "apiserver-test")
+	assertStringField(t, createPayload, "region", testSDKRegion)
+	assertNestedStringField(t, createPayload, []string{"labels", "cluster"}, "test")
+	assertNestedBoolField(t, createPayload, []string{"options", "ephemeralAddress"}, true)
+	assertNestedStringField(t, createPayload, []string{"networks", "0", "networkId"}, testSDKNetworkID)
+	assertNestedStringField(t, createPayload, []string{"networks", "0", "role"}, "ROLE_LISTENERS_AND_TARGETS")
+	assertNestedStringField(t, createPayload, []string{"targetPools", "0", "name"}, apiserverTargetPoolName)
+	assertNestedNumberField(t, createPayload, []string{"targetPools", "0", "targetPort"}, 6443)
+	assertNestedStringField(t, createPayload, []string{"targetPools", "0", "targets", "0", "displayName"}, "cp-0")
+	assertNestedStringField(t, createPayload, []string{"targetPools", "0", "targets", "0", "ip"}, "10.0.0.10")
+	assertNestedStringField(t, createPayload, []string{"listeners", "0", "targetPool"}, apiserverTargetPoolName)
+	assertNestedNumberField(t, createPayload, []string{"listeners", "0", "port"}, 6443)
+}
+
+func TestSDKClientLoadBalancerTargetUpdates(t *testing.T) {
+	var mu sync.Mutex
+	targets := []interface{}{
+		map[string]interface{}{"displayName": "cp-0", "ip": "10.0.0.10"},
+	}
+	var updatePayloads []map[string]interface{}
+
+	server := newSDKTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/load-balancers/apiserver-test"):
+			writeJSON(t, w, sdkLoadBalancerJSON("apiserver-test", "203.0.113.10", []interface{}{
+				map[string]interface{}{"name": apiserverTargetPoolName, "targetPort": 6443, "targets": targets},
+			}))
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/load-balancers/apiserver-test/target-pools/"+apiserverTargetPoolName):
+			payload := readJSON(t, r)
+			updatePayloads = append(updatePayloads, payload)
+			next, ok := lookup(payload, "targets").([]interface{})
+			if !ok {
+				t.Fatalf("update target payload missing targets: %#v", payload)
+			}
+			targets = next
+			writeJSON(t, w, map[string]interface{}{
+				"name":       apiserverTargetPoolName,
+				"targetPort": 6443,
+				"targets":    targets,
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+
+	client := newTestSDKClient(t, server.URL)
+	input := LoadBalancerTargetInput{
+		LoadBalancerID: "apiserver-test",
+		Name:           "cp-1",
+		IP:             "10.0.0.11",
+		Port:           6443,
+	}
+	if err := client.EnsureAPIServerLoadBalancerTarget(context.Background(), input); err != nil {
+		t.Fatalf("EnsureAPIServerLoadBalancerTarget() error = %v", err)
+	}
+	if err := client.DeleteAPIServerLoadBalancerTarget(context.Background(), input); err != nil {
+		t.Fatalf("DeleteAPIServerLoadBalancerTarget() error = %v", err)
+	}
+
+	if len(updatePayloads) != 2 {
+		t.Fatalf("got %d update payloads, want 2", len(updatePayloads))
+	}
+	assertNestedStringField(t, updatePayloads[0], []string{"targets", "1", "displayName"}, "cp-1")
+	assertNestedStringField(t, updatePayloads[0], []string{"targets", "1", "ip"}, "10.0.0.11")
+	if got := nestedValue(t, updatePayloads[1], []string{"targets"}).([]interface{}); len(got) != 1 {
+		t.Fatalf("delete target payload targets = %#v, want one remaining target", got)
+	}
+	assertNestedStringField(t, updatePayloads[1], []string{"targets", "0", "displayName"}, "cp-0")
+}
+
+func TestSDKClientClassifiesHTTPStatusCodes(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		check  func(error) bool
+	}{
+		{name: "not found", status: http.StatusNotFound, check: IsNotFound},
+		{name: "unauthorized", status: http.StatusUnauthorized, check: IsUnauthorized},
+		{name: "conflict", status: http.StatusConflict, check: IsConflict},
+		{name: "invalid input", status: http.StatusBadRequest, check: IsInvalidInput},
+		{name: "rate limited", status: http.StatusTooManyRequests, check: IsTransient},
+		{name: "server error", status: http.StatusInternalServerError, check: IsTransient},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := newSDKTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, http.StatusText(tt.status), tt.status)
+			}))
+			client := newTestSDKClient(t, server.URL)
+
+			_, err := client.GetServer(context.Background(), testSDKServerID)
+			if err == nil {
+				t.Fatal("GetServer() error = nil")
+			}
+			if !tt.check(err) {
+				t.Fatalf("GetServer() error = %v, did not match expected classifier", err)
+			}
+		})
+	}
+}
+
+func newSDKTestServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	return server
+}
+
+func newTestSDKClient(t *testing.T, endpoint string) *SDKClient {
+	t.Helper()
+
+	t.Setenv(stackitNoAuthEnv, "true")
+	t.Setenv(stackitIAASEndpointEnv, endpoint)
+	t.Setenv(stackitLBEndpointEnv, endpoint)
+
+	client, err := NewClient(context.Background(), Credentials{
+		ProjectID: testSDKProjectID,
+		Region:    testSDKRegion,
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	sdkClient, ok := client.(*SDKClient)
+	if !ok {
+		t.Fatalf("NewClient() = %T, want *SDKClient", client)
+	}
+	return sdkClient
+}
+
+func sdkLoadBalancerJSON(name, externalAddress string, targetPools []interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"name":            name,
+		"externalAddress": externalAddress,
+		"listeners": []interface{}{
+			map[string]interface{}{"displayName": apiserverListenerName, "port": 6443, "targetPool": apiserverTargetPoolName},
+		},
+		"targetPools": targetPools,
+	}
+}
+
+func readJSON(t *testing.T, r *http.Request) map[string]interface{} {
+	t.Helper()
+
+	var out map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&out); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	return out
+}
+
+func writeJSON(t *testing.T, w http.ResponseWriter, value interface{}) {
+	t.Helper()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		t.Fatalf("encode response body: %v", err)
+	}
+}
+
+func assertStringField(t *testing.T, m map[string]interface{}, key, want string) {
+	t.Helper()
+	if got := lookup(m, key); got != want {
+		t.Fatalf("%s = %#v, want %q in %#v", key, got, want, m)
+	}
+}
+
+func assertNestedStringField(t *testing.T, m map[string]interface{}, path []string, want string) {
+	t.Helper()
+	if got := nestedValue(t, m, path); got != want {
+		t.Fatalf("%s = %#v, want %q in %#v", strings.Join(path, "."), got, want, m)
+	}
+}
+
+func assertNestedBoolField(t *testing.T, m map[string]interface{}, path []string, want bool) {
+	t.Helper()
+	if got := nestedValue(t, m, path); got != want {
+		t.Fatalf("%s = %#v, want %t in %#v", strings.Join(path, "."), got, want, m)
+	}
+}
+
+func assertNestedNumberField(t *testing.T, m map[string]interface{}, path []string, want float64) {
+	t.Helper()
+	if got := nestedValue(t, m, path); got != want {
+		t.Fatalf("%s = %#v, want %v in %#v", strings.Join(path, "."), got, want, m)
+	}
+}
+
+func nestedValue(t *testing.T, m map[string]interface{}, path []string) interface{} {
+	t.Helper()
+
+	var current interface{} = m
+	for _, part := range path {
+		switch typed := current.(type) {
+		case map[string]interface{}:
+			current = lookup(typed, part)
+		case []interface{}:
+			if len(part) != 1 || part[0] < '0' || part[0] > '9' {
+				t.Fatalf("path element %q cannot index %#v", part, typed)
+			}
+			index := int(part[0] - '0')
+			if index >= len(typed) {
+				t.Fatalf("path element %q out of range for %#v", part, typed)
+			}
+			current = typed[index]
+		default:
+			t.Fatalf("path element %q cannot descend into %#v", part, typed)
+		}
+	}
+	return current
+}
+
+func lookup(m map[string]interface{}, key string) interface{} {
+	for _, candidate := range []string{
+		key,
+		strings.ToUpper(key[:1]) + key[1:],
+	} {
+		if value, ok := m[candidate]; ok {
+			return value
+		}
+	}
+	return nil
+}

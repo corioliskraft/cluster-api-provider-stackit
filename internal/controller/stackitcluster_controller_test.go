@@ -6,79 +6,243 @@ you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 */
 
 package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	infrastructurev1alpha1 "voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1"
+	infrav1 "voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1"
+	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud"
+	cloudfake "voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud/fake"
 )
 
 var _ = Describe("StackitCluster Controller", func() {
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+	const namespace = "default"
 
-		ctx := context.Background()
+	var (
+		ctx          context.Context
+		clusterName  string
+		credentials  string
+		fakeCloud    *cloudfake.Client
+		reconciler   *StackitClusterReconciler
+		request      reconcile.Request
+		stackitKey   types.NamespacedName
+		stackitClust *infrav1.StackitCluster
+	)
 
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+	BeforeEach(func() {
+		ctx = context.Background()
+		clusterName = fmt.Sprintf("cluster-%d", time.Now().UnixNano())
+		credentials = "stackit-credentials-" + clusterName
+		stackitKey = types.NamespacedName{Namespace: namespace, Name: clusterName}
+		request = reconcile.Request{NamespacedName: stackitKey}
+		fakeCloud = cloudfake.New(cloud.Network{ID: testNetworkID, Name: "network"})
+		reconciler = &StackitClusterReconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+			CloudClientFactory: func(context.Context, cloud.Credentials) (cloud.Client, error) {
+				return fakeCloud, nil
+			},
 		}
-		stackitcluster := &infrastructurev1alpha1.StackitCluster{}
 
-		BeforeEach(func() {
-			By("creating the custom resource for the Kind StackitCluster")
-			err := k8sClient.Get(ctx, typeNamespacedName, stackitcluster)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &infrastructurev1alpha1.StackitCluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					// TODO(user): Specify other spec details if needed.
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
-		})
+		createCredentialsSecret(ctx, credentials, namespace, testProjectID)
+		createOwnerCluster(ctx, clusterName, namespace)
+		stackitClust = newStackitCluster(clusterName, namespace, true)
+		stackitClust.Spec.CredentialsSecretRef.Name = credentials
+		Expect(k8sClient.Create(ctx, stackitClust)).To(Succeed())
+	})
 
-		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &infrastructurev1alpha1.StackitCluster{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
+	AfterEach(func() {
+		deleteIfExists(ctx, stackitClust)
+		deleteIfExists(ctx, &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: clusterName, Namespace: namespace}})
+		deleteIfExists(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: credentials, Namespace: namespace}})
+	})
 
-			By("Cleanup the specific resource instance StackitCluster")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &StackitClusterReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+	It("sets Ready after network validation and waits for the first load balancer target", func() {
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
-		})
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Ready).To(BeTrue())
+		Expect(got.Status.APIServerEndpoint.Host).To(Equal("198.51.100.1"))
+		Expect(got.Status.APIServerLoadBalancerID).To(BeEmpty())
+		Expect(fakeCloud.LoadBalancerCount()).To(Equal(0))
+		expectCondition(got.Status.Conditions, infrav1.ClusterReadyCondition, metav1.ConditionTrue, "Available")
+		expectCondition(got.Status.Conditions, infrav1.ClusterNetworkReadyCondition, metav1.ConditionTrue, "Available")
+		expectCondition(got.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition, metav1.ConditionFalse, "Provisioning")
+	})
+
+	It("uses an externally provided control plane endpoint when load balancer creation is disabled", func() {
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Spec.APIServerLoadBalancer.Enabled = false
+		got.Spec.ControlPlaneEndpoint = clusterv1.APIEndpoint{Host: "198.51.100.10", Port: 6443}
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Ready).To(BeTrue())
+		Expect(got.Status.APIServerEndpoint.Host).To(Equal("198.51.100.10"))
+		Expect(fakeCloud.LoadBalancerCount()).To(Equal(0))
+		expectCondition(got.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition, metav1.ConditionTrue, "Skipped")
+	})
+
+	It("marks the network not ready when the configured network does not exist", func() {
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Spec.Network.ID = "99999999-9999-9999-9999-999999999999"
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Ready).To(BeFalse())
+		expectCondition(got.Status.Conditions, infrav1.ClusterNetworkReadyCondition, metav1.ConditionFalse, "NetworkNotFound")
+		expectCondition(got.Status.Conditions, infrav1.ClusterReadyCondition, metav1.ConditionFalse, "NetworkNotFound")
+	})
+
+	It("requeues when network lookup returns a transient error", func() {
+		fakeCloud.FailNextGetNetwork = fmt.Errorf("temporary network lookup failure: %w", cloud.ErrTransient)
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue())
+
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		expectCondition(got.Status.Conditions, infrav1.ClusterNetworkReadyCondition, metav1.ConditionFalse, "NetworkNotFound")
+		expectCondition(got.Status.Conditions, infrav1.ClusterReadyCondition, metav1.ConditionFalse, "NetworkNotFound")
+	})
+
+	It("marks credentials invalid without requeueing on unauthorized credentials", func() {
+		reconciler.CloudClientFactory = func(context.Context, cloud.Credentials) (cloud.Client, error) {
+			return nil, fmt.Errorf("authenticate: %w", cloud.ErrUnauthorized)
+		}
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		expectCondition(got.Status.Conditions, infrav1.ClusterCredentialsReadyCondition, metav1.ConditionFalse, "CredentialsInvalid")
+		expectCondition(got.Status.Conditions, infrav1.ClusterReadyCondition, metav1.ConditionFalse, "CredentialsInvalid")
+	})
+
+	It("deletes the provider-managed load balancer and removes the finalizer", func() {
+		_, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		loadBalancerID := createAPIServerLoadBalancer(ctx, fakeCloud)
+		updateStackitClusterLoadBalancer(ctx, clusterName, namespace, loadBalancerID)
+		Expect(fakeCloud.LoadBalancerCount()).To(Equal(1))
+
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
+
+		_, err = reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(fakeCloud.LoadBalancerCount()).To(Equal(0))
+		Eventually(func() bool {
+			err := k8sClient.Get(ctx, stackitKey, &infrav1.StackitCluster{})
+			return apierrors.IsNotFound(err)
+		}).Should(BeTrue())
+	})
+
+	It("keeps the finalizer when load balancer deletion returns a transient error", func() {
+		_, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		loadBalancerID := createAPIServerLoadBalancer(ctx, fakeCloud)
+		updateStackitClusterLoadBalancer(ctx, clusterName, namespace, loadBalancerID)
+
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
+		fakeCloud.FailNextDeleteLB = fmt.Errorf("delete load balancer: %w", cloud.ErrTransient)
+
+		_, err = reconciler.Reconcile(ctx, request)
+		Expect(err).To(HaveOccurred())
+		Expect(fakeCloud.LoadBalancerCount()).To(Equal(1))
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Finalizers).To(ContainElement(infrav1.ClusterFinalizer))
+	})
+
+	It("maps owning Cluster events to StackitCluster reconcile requests", func() {
+		cluster := &clusterv1.Cluster{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName, Namespace: namespace}, cluster)).To(Succeed())
+
+		requests := reconciler.stackitClusterRequestsForCluster(ctx, cluster)
+		Expect(requests).To(Equal([]reconcile.Request{request}))
+	})
+
+	It("ignores Cluster events for other infrastructure providers", func() {
+		cluster := &clusterv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: namespace},
+			Spec: clusterv1.ClusterSpec{
+				InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+					APIGroup: "other.infrastructure.example.com",
+					Kind:     "OtherCluster",
+					Name:     "other",
+				},
+			},
+		}
+
+		requests := reconciler.stackitClusterRequestsForCluster(ctx, cluster)
+		Expect(requests).To(BeEmpty())
 	})
 })
+
+func newStackitCluster(name, namespace string, lbEnabled bool) *infrav1.StackitCluster {
+	return &infrav1.StackitCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: clusterv1.GroupVersion.String(),
+				Kind:       "Cluster",
+				Name:       name,
+				UID:        types.UID("cluster-" + name),
+			}},
+		},
+		Spec: infrav1.StackitClusterSpec{
+			ProjectID: testProjectID,
+			Region:    "eu01",
+			CredentialsSecretRef: corev1.SecretReference{
+				Name:      "stackit-credentials",
+				Namespace: namespace,
+			},
+			Network: infrav1.StackitClusterNetworkSpec{
+				ID: testNetworkID,
+			},
+			APIServerLoadBalancer: infrav1.StackitAPIServerLoadBalancerSpec{
+				Enabled: lbEnabled,
+			},
+			ControlPlaneEndpoint: clusterv1.APIEndpoint{
+				Host: "198.51.100.1",
+				Port: 6443,
+			},
+		},
+	}
+}

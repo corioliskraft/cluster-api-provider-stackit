@@ -13,21 +13,32 @@ package util
 import "testing"
 
 func TestClusterTags(t *testing.T) {
-	got := ClusterTags("cluster-a", "default")
+	got := ClusterTags("cluster-a", "default", map[string]string{
+		"environment":         "dev",
+		LabelClusterName:      "override",
+		LabelClusterNamespace: "override",
+		LabelManagedBy:        "override",
+		LabelProviderManaged:  "override",
+		"another.example":     "value",
+	})
 
 	assertTag(t, got, LabelClusterName, "cluster-a")
 	assertTag(t, got, LabelClusterNamespace, "default")
 	assertTag(t, got, LabelManagedBy, ManagedByValue)
+	assertTag(t, got, LabelProviderManaged, ProviderManagedValue)
+	assertTag(t, got, "environment", "dev")
+	assertTag(t, got, "another.example", "value")
 }
 
 func TestMachineTags(t *testing.T) {
 	got := MachineTags("cluster-a", "default", "machine-a", "uid-a", map[string]string{
-		"environment":     "dev",
-		LabelMachineName:  "override",
-		LabelMachineUID:   "override",
-		LabelManagedBy:    "override",
-		LabelClusterName:  "override",
-		"another.example": "value",
+		"environment":        "dev",
+		LabelMachineName:     "override",
+		LabelMachineUID:      "override",
+		LabelManagedBy:       "override",
+		LabelProviderManaged: "override",
+		LabelClusterName:     "override",
+		"another.example":    "value",
 	})
 
 	assertTag(t, got, LabelClusterName, "cluster-a")
@@ -35,6 +46,7 @@ func TestMachineTags(t *testing.T) {
 	assertTag(t, got, LabelMachineName, "machine-a")
 	assertTag(t, got, LabelMachineUID, "uid-a")
 	assertTag(t, got, LabelManagedBy, ManagedByValue)
+	assertTag(t, got, LabelProviderManaged, ProviderManagedValue)
 	assertTag(t, got, "environment", "dev")
 	assertTag(t, got, "another.example", "value")
 }

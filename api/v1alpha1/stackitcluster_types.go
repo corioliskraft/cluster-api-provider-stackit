@@ -60,6 +60,12 @@ type StackitClusterSpec struct {
 	// when apiServerLoadBalancer.enabled is false.
 	// +optional
 	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty,omitzero"`
+
+	// additionalLabels is merged into the labels applied to cluster-wide
+	// STACKIT resources such as the API server load balancer.
+	// +optional
+	// +kubebuilder:validation:MaxProperties=64
+	AdditionalLabels map[string]string `json:"additionalLabels,omitempty"`
 }
 
 // StackitClusterNetworkSpec references an existing STACKIT network.

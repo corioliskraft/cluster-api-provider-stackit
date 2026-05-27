@@ -53,6 +53,14 @@ spec:
                       spec is the StackitClusterSpec that will be used to create the
                       StackitCluster.
                     properties:
+                      additionalLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          additionalLabels is merged into the labels applied to cluster-wide
+                          STACKIT resources such as the API server load balancer.
+                        maxProperties: 64
+                        type: object
                       apiServerLoadBalancer:
                         description: |-
                           apiServerLoadBalancer configures the load balancer in front of the

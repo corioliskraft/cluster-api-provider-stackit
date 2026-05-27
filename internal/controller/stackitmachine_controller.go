@@ -317,7 +317,7 @@ func (r *StackitMachineReconciler) reconcileAPIServerLoadBalancerTarget(
 			Region:    s.StackitCluster.Spec.Region,
 			NetworkID: s.StackitCluster.Spec.Network.ID,
 			Port:      defaultAPIServerPort,
-			Tags:      util.ClusterTags(s.StackitCluster.Name, s.StackitCluster.Namespace),
+			Tags:      util.ClusterTags(s.StackitCluster.Name, s.StackitCluster.Namespace, s.StackitCluster.Spec.AdditionalLabels),
 			Targets: []cloud.LoadBalancerTargetInput{{
 				Name: s.Machine.Name,
 				IP:   ip,

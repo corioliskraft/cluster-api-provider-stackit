@@ -20,19 +20,33 @@ const (
 	LabelMachineName      = "cluster.x-k8s.io/machine-name"
 	LabelMachineUID       = "cluster.x-k8s.io/machine-uid"
 	LabelManagedBy        = "cluster.x-k8s.io/managed-by"
+	LabelProviderManaged  = "cluster-api-provider-stackit/managed"
+	LabelE2E              = "cluster-api-provider-stackit/e2e"
+	LabelTestID           = "cluster-api-provider-stackit/test-id"
 
 	// ManagedByValue identifies resources managed by this provider.
-	ManagedByValue = "cluster-api-provider-stackit"
+	ManagedByValue       = "cluster-api-provider-stackit"
+	ProviderManagedValue = "true"
+	E2EValue             = "true"
 )
 
 // ClusterTags returns the canonical tags applied to cluster-wide cloud
-// resources (e.g. the API server load balancer).
-func ClusterTags(clusterName, clusterNamespace string) map[string]string {
-	return map[string]string{
+// resources (e.g. the API server load balancer). additionalLabels is merged in
+// last so the provider's own tags cannot be overwritten.
+func ClusterTags(clusterName, clusterNamespace string, additionalLabels map[string]string) map[string]string {
+	out := map[string]string{
 		LabelClusterName:      clusterName,
 		LabelClusterNamespace: clusterNamespace,
 		LabelManagedBy:        ManagedByValue,
+		LabelProviderManaged:  ProviderManagedValue,
 	}
+	for k, v := range additionalLabels {
+		if _, isReserved := out[k]; isReserved {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // MachineTags returns the canonical tags applied to per-machine cloud
@@ -45,6 +59,7 @@ func MachineTags(clusterName, clusterNamespace, machineName, machineUID string, 
 		LabelMachineName:      machineName,
 		LabelMachineUID:       machineUID,
 		LabelManagedBy:        ManagedByValue,
+		LabelProviderManaged:  ProviderManagedValue,
 	}
 	for k, v := range additionalLabels {
 		if _, isReserved := out[k]; isReserved {

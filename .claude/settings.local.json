@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go env *)",
+      "Bash(go list *)",
+      "Bash(go get *)",
+      "Bash(go build *)",
+      "Bash(go doc *)",
+      "Bash(make generate *)",
+      "Bash(make manifests *)",
+      "Bash(go mod *)"
+    ]
+  }
+}

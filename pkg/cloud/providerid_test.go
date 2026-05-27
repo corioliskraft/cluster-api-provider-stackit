@@ -64,3 +64,25 @@ func TestProviderIDRoundTrip(t *testing.T) {
 		t.Fatalf("roundtrip = %q, %q, %q", gotProjectID, gotRegion, gotServerID)
 	}
 }
+
+func TestProviderIDMatchesCloudProviderStackitFormat(t *testing.T) {
+	serverID := "321a8b81-3660-43e5-bab8-6470b65ee4e8"
+	providerID := NewProviderID("project-id", "eu01", serverID)
+
+	// Verified against the local cloud-provider-stackit repository:
+	// pkg/ccm/instances.go uses fmt.Sprintf("%s://%s", ProviderName, server.GetId()).
+	if providerID != "stackit://"+serverID {
+		t.Fatalf("NewProviderID() = %q, want cloud-provider-stackit format %q", providerID, "stackit://"+serverID)
+	}
+
+	projectID, region, parsedServerID, err := ParseProviderID(providerID)
+	if err != nil {
+		t.Fatalf("ParseProviderID(%q) error = %v", providerID, err)
+	}
+	if projectID != "" || region != "" {
+		t.Fatalf("ParseProviderID(%q) returned project/region %q/%q, want empty because cloud-provider-stackit does not encode them", providerID, projectID, region)
+	}
+	if parsedServerID != serverID {
+		t.Fatalf("ParseProviderID(%q) serverID = %q, want %q", providerID, parsedServerID, serverID)
+	}
+}

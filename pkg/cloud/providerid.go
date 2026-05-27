@@ -22,16 +22,25 @@ const providerIDScheme = "stackit://"
 // ErrInvalidProviderID is returned by ParseProviderID for malformed values.
 var ErrInvalidProviderID = errors.New("invalid providerID")
 
-// NewProviderID returns a providerID string in the STACKIT format.
+// NewProviderID returns a providerID string in the STACKIT format used by
+// cloud-provider-stackit.
 //
-// Format verified against cloud-provider-stackit:
-// stackit://<server-id>
+// Format verified against the local cloud-provider-stackit repository:
+//   - pkg/ccm/instances.go: Instances.makeInstanceID returns stackit://<server-id>
+//   - pkg/ccm/instances.go: instanceIDFromProviderID parses only the server ID
+//
+// Project ID and region are intentionally not encoded in the providerID. The
+// cloud-provider-stackit controller gets project and region from its own
+// configuration and then resolves Node.spec.providerID via GetServer(projectID,
+// region, serverID).
 func NewProviderID(projectID, region, serverID string) string {
 	return fmt.Sprintf("%s%s", providerIDScheme, serverID)
 }
 
-// ParseProviderID splits a providerID string into its components. It returns
-// ErrInvalidProviderID if any component is empty or the scheme is wrong.
+// ParseProviderID splits a providerID string into its components. The current
+// STACKIT providerID format does not contain project or region, so those return
+// values are empty. It returns ErrInvalidProviderID if any encoded component is
+// empty or the scheme is wrong.
 func ParseProviderID(providerID string) (projectID, region, serverID string, err error) {
 	if !strings.HasPrefix(providerID, providerIDScheme) {
 		return "", "", "", fmt.Errorf("%w: missing scheme %q", ErrInvalidProviderID, providerIDScheme)

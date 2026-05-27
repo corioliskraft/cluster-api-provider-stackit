@@ -66,12 +66,12 @@
 
 ## Missing
 
-- [ ] PR 1: Audit and fix Cluster API infrastructure provider contract behavior.
-  - [ ] Verify StackitCluster contract fields, status, conditions, finalizer, owner references, paused handling, and observedGeneration.
-  - [ ] Verify StackitMachine contract fields, `spec.providerID`, status, conditions, finalizer, owner references, paused handling, and observedGeneration.
-  - [ ] Ensure paused Clusters or paused objects do not trigger cloud API calls.
-  - [ ] Ensure conditions include observedGeneration and specific reasons.
-  - [ ] Regenerate CRDs/deepcopy and run unit/envtest coverage.
+- [x] PR 1: Audit and fix Cluster API infrastructure provider contract behavior.
+  - [x] Verify StackitCluster contract fields, status, conditions, finalizer, owner references, paused handling, and observedGeneration.
+  - [x] Verify StackitMachine contract fields, `spec.providerID`, status, conditions, finalizer, owner references, paused handling, and observedGeneration.
+  - [x] Ensure paused Clusters or paused objects do not trigger cloud API calls.
+  - [x] Ensure conditions include observedGeneration and specific reasons.
+  - [x] Regenerate CRDs/deepcopy and run unit/envtest coverage.
 - [ ] PR 2: Re-verify providerID compatibility with `cloud-provider-stackit`.
   - [ ] Confirm providerID format, generation, parsing, and node matching against upstream cloud provider behavior.
   - [ ] Keep `NewProviderID`, `ParseProviderID`, round-trip, and cloud-provider-format tests green.

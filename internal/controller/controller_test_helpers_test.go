@@ -160,6 +160,7 @@ func expectCondition(conditions []metav1.Condition, conditionType string, status
 		if condition.Type == conditionType {
 			Expect(condition.Status).To(Equal(status))
 			Expect(condition.Reason).To(Equal(reason))
+			Expect(condition.ObservedGeneration).NotTo(BeZero())
 			return
 		}
 	}

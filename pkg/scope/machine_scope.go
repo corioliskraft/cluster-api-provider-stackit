@@ -62,5 +62,6 @@ func (s *MachineScope) PatchObject(ctx context.Context) error {
 		infrav1.MachineBootstrapReadyCondition,
 		infrav1.MachineCredentialsReadyCondition,
 		infrav1.MachineInstanceReadyCondition,
+		clusterv1.PausedCondition,
 	}})
 }

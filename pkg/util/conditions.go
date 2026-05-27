@@ -18,18 +18,23 @@ import (
 //
 // The LastTransitionTime is only refreshed when the status actually changes,
 // so callers can call this unconditionally on every reconcile.
-func SetCondition(conditions *[]metav1.Condition, condType string, status metav1.ConditionStatus, reason, message string) {
+func SetCondition(conditions *[]metav1.Condition, condType string, status metav1.ConditionStatus, reason, message string, observedGeneration ...int64) {
 	now := metav1.Now()
+	var generation int64
+	if len(observedGeneration) > 0 {
+		generation = observedGeneration[0]
+	}
 	for i, c := range *conditions {
 		if c.Type != condType {
 			continue
 		}
-		if c.Status == status && c.Reason == reason && c.Message == message {
+		if c.Status == status && c.Reason == reason && c.Message == message && c.ObservedGeneration == generation {
 			return
 		}
 		(*conditions)[i].Status = status
 		(*conditions)[i].Reason = reason
 		(*conditions)[i].Message = message
+		(*conditions)[i].ObservedGeneration = generation
 		if c.Status != status {
 			(*conditions)[i].LastTransitionTime = now
 		}
@@ -40,6 +45,7 @@ func SetCondition(conditions *[]metav1.Condition, condType string, status metav1
 		Status:             status,
 		Reason:             reason,
 		Message:            message,
+		ObservedGeneration: generation,
 		LastTransitionTime: now,
 	})
 }

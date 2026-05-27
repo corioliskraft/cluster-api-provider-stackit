@@ -91,6 +91,12 @@ func (r *StackitClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}()
 
+	if paused, message := reconciliationPaused(cluster, stackitCluster); paused {
+		setPausedCondition(&stackitCluster.Status.Conditions, stackitCluster.Generation, true, message)
+		return ctrl.Result{}, nil
+	}
+	setPausedCondition(&stackitCluster.Status.Conditions, stackitCluster.Generation, false, "")
+
 	if !stackitCluster.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, clusterScope)
 	}
@@ -109,9 +115,9 @@ func (r *StackitClusterReconciler) reconcileNormal(ctx context.Context, s *scope
 	if err != nil {
 		sc.Status.Ready = false
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterCredentialsReadyCondition,
-			metav1.ConditionFalse, "CredentialsInvalid", err.Error())
+			metav1.ConditionFalse, "CredentialsInvalid", err.Error(), sc.Generation)
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
-			metav1.ConditionFalse, "CredentialsInvalid", err.Error())
+			metav1.ConditionFalse, "CredentialsInvalid", err.Error(), sc.Generation)
 		// Auth/invalid input errors should not aggressively requeue.
 		if cloud.IsUnauthorized(err) || cloud.IsInvalidInput(err) || errors.Is(err, util.ErrCredentialsInvalid) {
 			return ctrl.Result{}, nil
@@ -119,21 +125,21 @@ func (r *StackitClusterReconciler) reconcileNormal(ctx context.Context, s *scope
 		return ctrl.Result{}, err
 	}
 	util.SetCondition(&sc.Status.Conditions, infrav1.ClusterCredentialsReadyCondition,
-		metav1.ConditionTrue, "Available", "")
+		metav1.ConditionTrue, "Available", "", sc.Generation)
 
 	if _, err := cloudClient.GetNetwork(ctx, sc.Spec.Network.ID); err != nil {
 		sc.Status.Ready = false
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterNetworkReadyCondition,
-			metav1.ConditionFalse, "NetworkNotFound", err.Error())
+			metav1.ConditionFalse, "NetworkNotFound", err.Error(), sc.Generation)
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
-			metav1.ConditionFalse, "NetworkNotFound", err.Error())
+			metav1.ConditionFalse, "NetworkNotFound", err.Error(), sc.Generation)
 		if cloud.IsRetryable(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
 		return ctrl.Result{}, nil
 	}
 	util.SetCondition(&sc.Status.Conditions, infrav1.ClusterNetworkReadyCondition,
-		metav1.ConditionTrue, "Available", "")
+		metav1.ConditionTrue, "Available", "", sc.Generation)
 
 	if sc.Spec.APIServerLoadBalancer.Enabled {
 		if sc.Status.APIServerLoadBalancerID == "" {
@@ -141,25 +147,25 @@ func (r *StackitClusterReconciler) reconcileNormal(ctx context.Context, s *scope
 				sc.Status.APIServerEndpoint = sc.Spec.ControlPlaneEndpoint
 			}
 			util.SetCondition(&sc.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition,
-				metav1.ConditionFalse, "Provisioning", "waiting for first control-plane machine target")
+				metav1.ConditionFalse, "Provisioning", "waiting for first control-plane machine target", sc.Generation)
 		}
 	} else if sc.Spec.ControlPlaneEndpoint.Host != "" {
 		sc.Status.APIServerEndpoint = sc.Spec.ControlPlaneEndpoint
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition,
-			metav1.ConditionTrue, "Skipped", "external endpoint provided")
+			metav1.ConditionTrue, "Skipped", "external endpoint provided", sc.Generation)
 	} else {
 		sc.Status.Ready = false
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition,
-			metav1.ConditionFalse, "EndpointMissing", "apiServerLoadBalancer.enabled is false and controlPlaneEndpoint is empty")
+			metav1.ConditionFalse, "EndpointMissing", "apiServerLoadBalancer.enabled is false and controlPlaneEndpoint is empty", sc.Generation)
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
-			metav1.ConditionFalse, "EndpointMissing", "apiServerLoadBalancer.enabled is false and controlPlaneEndpoint is empty")
+			metav1.ConditionFalse, "EndpointMissing", "apiServerLoadBalancer.enabled is false and controlPlaneEndpoint is empty", sc.Generation)
 		return ctrl.Result{}, nil
 	}
 
 	sc.Status.Ready = true
 	sc.Status.Initialization.Provisioned = true
 	util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
-		metav1.ConditionTrue, "Available", "")
+		metav1.ConditionTrue, "Available", "", sc.Generation)
 	log.V(1).Info("StackitCluster ready", "endpoint", sc.Status.APIServerEndpoint)
 	return ctrl.Result{}, nil
 }
@@ -173,7 +179,7 @@ func (r *StackitClusterReconciler) reconcileDelete(ctx context.Context, s *scope
 			// but do not block forever; finalizer removal is gated on the LB
 			// deletion succeeding (or being already absent).
 			util.SetCondition(&sc.Status.Conditions, infrav1.ClusterCredentialsReadyCondition,
-				metav1.ConditionFalse, "CredentialsInvalid", err.Error())
+				metav1.ConditionFalse, "CredentialsInvalid", err.Error(), sc.Generation)
 			return ctrl.Result{}, err
 		}
 		if err := cloudClient.DeleteAPIServerLoadBalancer(ctx, sc.Status.APIServerLoadBalancerID); err != nil && !cloud.IsNotFound(err) {

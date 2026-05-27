@@ -55,5 +55,6 @@ func (s *ClusterScope) PatchObject(ctx context.Context) error {
 		infrav1.ClusterNetworkReadyCondition,
 		infrav1.ClusterLoadBalancerReadyCondition,
 		infrav1.ClusterCredentialsReadyCondition,
+		clusterv1.PausedCondition,
 	}})
 }

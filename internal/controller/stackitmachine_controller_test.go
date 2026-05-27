@@ -21,6 +21,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -146,6 +147,55 @@ var _ = Describe("StackitMachine Controller", func() {
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		expectCondition(got.Status.Conditions, infrav1.MachineCredentialsReadyCondition, metav1.ConditionFalse, "CredentialsInvalid")
 		expectCondition(got.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionFalse, "CredentialsInvalid")
+	})
+
+	It("does not call the cloud API when the owning Cluster is paused", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		cluster := &clusterv1.Cluster{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName, Namespace: namespace}, cluster)).To(Succeed())
+		cluster.Spec.Paused = ptr.To(true)
+		Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
+
+		cloudClientFactoryCalls := 0
+		reconciler.CloudClientFactory = func(context.Context, cloud.Credentials) (cloud.Client, error) {
+			cloudClientFactoryCalls++
+			return fakeCloud, nil
+		}
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+		Expect(cloudClientFactoryCalls).To(Equal(0))
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		expectCondition(got.Status.Conditions, clusterv1.PausedCondition, metav1.ConditionTrue, clusterv1.PausedReason)
+	})
+
+	It("does not call the cloud API when the StackitMachine has the paused annotation", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Annotations = map[string]string{clusterv1.PausedAnnotation: ""}
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		cloudClientFactoryCalls := 0
+		reconciler.CloudClientFactory = func(context.Context, cloud.Credentials) (cloud.Client, error) {
+			cloudClientFactoryCalls++
+			return fakeCloud, nil
+		}
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+		Expect(cloudClientFactoryCalls).To(Equal(0))
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		expectCondition(got.Status.Conditions, clusterv1.PausedCondition, metav1.ConditionTrue, clusterv1.PausedReason)
 	})
 
 	It("requeues when server lookup returns a conflict", func() {

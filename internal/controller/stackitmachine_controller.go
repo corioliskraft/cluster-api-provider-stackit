@@ -107,6 +107,12 @@ func (r *StackitMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}()
 
+	if paused, message := reconciliationPaused(cluster, stackitMachine); paused {
+		setPausedCondition(&stackitMachine.Status.Conditions, stackitMachine.Generation, true, message)
+		return ctrl.Result{}, nil
+	}
+	setPausedCondition(&stackitMachine.Status.Conditions, stackitMachine.Generation, false, "")
+
 	if !stackitMachine.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, machineScope)
 	}
@@ -123,15 +129,15 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 
 	if !s.StackitCluster.Status.Ready {
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
-			metav1.ConditionFalse, "InfrastructureNotReady", "waiting for StackitCluster to be ready")
+			metav1.ConditionFalse, "InfrastructureNotReady", "waiting for StackitCluster to be ready", sm.Generation)
 		return ctrl.Result{}, nil
 	}
 
 	bootstrapData, condStatus, reason, msg := r.fetchBootstrapData(ctx, s.Machine)
-	util.SetCondition(&sm.Status.Conditions, infrav1.MachineBootstrapReadyCondition, condStatus, reason, msg)
+	util.SetCondition(&sm.Status.Conditions, infrav1.MachineBootstrapReadyCondition, condStatus, reason, msg, sm.Generation)
 	if condStatus != metav1.ConditionTrue {
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
-			metav1.ConditionFalse, reason, msg)
+			metav1.ConditionFalse, reason, msg, sm.Generation)
 		// Per spec 13.3, missing/not-found cases requeue; invalid does not.
 		if reason == util.BootstrapReasonInvalid {
 			return ctrl.Result{}, nil
@@ -142,25 +148,25 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 	cloudClient, err := r.buildCloudClient(ctx, s.StackitCluster)
 	if err != nil {
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineCredentialsReadyCondition,
-			metav1.ConditionFalse, "CredentialsInvalid", err.Error())
+			metav1.ConditionFalse, "CredentialsInvalid", err.Error(), sm.Generation)
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
-			metav1.ConditionFalse, "CredentialsInvalid", err.Error())
+			metav1.ConditionFalse, "CredentialsInvalid", err.Error(), sm.Generation)
 		if cloud.IsUnauthorized(err) || cloud.IsInvalidInput(err) || errors.Is(err, util.ErrCredentialsInvalid) {
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
 	util.SetCondition(&sm.Status.Conditions, infrav1.MachineCredentialsReadyCondition,
-		metav1.ConditionTrue, "Available", "")
+		metav1.ConditionTrue, "Available", "", sm.Generation)
 
 	tags := util.MachineTags(s.Cluster.Name, s.Cluster.Namespace, s.Machine.Name, string(s.Machine.UID), sm.Spec.AdditionalLabels)
 
 	server, err := r.ensureServer(ctx, cloudClient, s, bootstrapData, tags)
 	if err != nil {
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineInstanceReadyCondition,
-			metav1.ConditionFalse, "InstanceError", err.Error())
+			metav1.ConditionFalse, "InstanceError", err.Error(), sm.Generation)
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
-			metav1.ConditionFalse, "InstanceError", err.Error())
+			metav1.ConditionFalse, "InstanceError", err.Error(), sm.Generation)
 		if cloud.IsRetryable(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
@@ -169,7 +175,7 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 
 	if err := r.reconcileAPIServerLoadBalancerTarget(ctx, cloudClient, s, server); err != nil {
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
-			metav1.ConditionFalse, "LoadBalancerTargetError", err.Error())
+			metav1.ConditionFalse, "LoadBalancerTargetError", err.Error(), sm.Generation)
 		if cloud.IsRetryable(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
@@ -187,9 +193,9 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 	sm.Status.Initialization.Provisioned = true
 
 	util.SetCondition(&sm.Status.Conditions, infrav1.MachineInstanceReadyCondition,
-		metav1.ConditionTrue, "Available", "")
+		metav1.ConditionTrue, "Available", "", sm.Generation)
 	util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
-		metav1.ConditionTrue, "Available", "")
+		metav1.ConditionTrue, "Available", "", sm.Generation)
 	log.V(1).Info("StackitMachine ready", "providerID", providerID)
 	return ctrl.Result{}, nil
 }
@@ -206,7 +212,7 @@ func (r *StackitMachineReconciler) reconcileDelete(ctx context.Context, s *scope
 	cloudClient, err := r.buildCloudClient(ctx, s.StackitCluster)
 	if err != nil {
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineCredentialsReadyCondition,
-			metav1.ConditionFalse, "CredentialsInvalid", err.Error())
+			metav1.ConditionFalse, "CredentialsInvalid", err.Error(), sm.Generation)
 		return ctrl.Result{}, err
 	}
 	if err := r.deleteAPIServerLoadBalancerTarget(ctx, cloudClient, s); err != nil {
@@ -357,9 +363,9 @@ func (r *StackitMachineReconciler) patchAPIServerLoadBalancerStatus(
 	s.StackitCluster.Status.APIServerEndpoint = endpoint
 	s.StackitCluster.Status.Initialization.Provisioned = true
 	util.SetCondition(&s.StackitCluster.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition,
-		metav1.ConditionTrue, "Available", "")
+		metav1.ConditionTrue, "Available", "", s.StackitCluster.Generation)
 	util.SetCondition(&s.StackitCluster.Status.Conditions, infrav1.ClusterReadyCondition,
-		metav1.ConditionTrue, "Available", "")
+		metav1.ConditionTrue, "Available", "", s.StackitCluster.Generation)
 	return r.Status().Patch(ctx, s.StackitCluster, client.MergeFrom(beforeStatus))
 }
 

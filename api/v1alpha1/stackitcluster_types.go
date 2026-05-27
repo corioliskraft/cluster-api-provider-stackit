@@ -17,53 +17,115 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// ClusterFinalizer allows StackitClusterReconciler to clean up resources before
+// the StackitCluster is finally removed from the API server.
+const ClusterFinalizer = "stackitcluster.infrastructure.cluster.x-k8s.io"
 
-// StackitClusterSpec defines the desired state of StackitCluster
+// StackitClusterSpec defines the desired state of StackitCluster.
+// +kubebuilder:validation:XValidation:rule="has(self.credentialsSecretRef.name) && size(self.credentialsSecretRef.name) > 0",message="credentialsSecretRef.name is required"
+// +kubebuilder:validation:XValidation:rule="has(self.apiServerLoadBalancer) && has(self.apiServerLoadBalancer.enabled) && self.apiServerLoadBalancer.enabled ? true : has(self.controlPlaneEndpoint) && has(self.controlPlaneEndpoint.host) && size(self.controlPlaneEndpoint.host) > 0",message="controlPlaneEndpoint.host is required when apiServerLoadBalancer.enabled is false"
 type StackitClusterSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// projectID is the STACKIT project that owns the cluster infrastructure.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F-]{36}$`
+	ProjectID string `json:"projectID"`
 
-	// foo is an example field of StackitCluster. Edit stackitcluster_types.go to remove/update
+	// region is the STACKIT region in which infrastructure is created.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-z]{2}[0-9]{2}$`
+	Region string `json:"region"`
+
+	// credentialsSecretRef references the Secret containing STACKIT credentials.
+	// +required
+	CredentialsSecretRef corev1.SecretReference `json:"credentialsSecretRef"`
+
+	// network references the existing STACKIT network the cluster will use.
+	// For MVP the network must already exist.
+	// +required
+	Network StackitClusterNetworkSpec `json:"network"`
+
+	// apiServerLoadBalancer configures the load balancer in front of the
+	// Kubernetes API server.
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	APIServerLoadBalancer StackitAPIServerLoadBalancerSpec `json:"apiServerLoadBalancer,omitempty"`
+
+	// controlPlaneEndpoint allows the user to provide a pre-existing endpoint
+	// when apiServerLoadBalancer.enabled is false.
+	// +optional
+	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty,omitzero"`
+}
+
+// StackitClusterNetworkSpec references an existing STACKIT network.
+type StackitClusterNetworkSpec struct {
+	// id is the STACKIT network ID.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F-]{36}$`
+	ID string `json:"id"`
+}
+
+// StackitAPIServerLoadBalancerSpec configures an optional load balancer for
+// the Kubernetes API server.
+type StackitAPIServerLoadBalancerSpec struct {
+	// enabled toggles creation of an API server load balancer.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // StackitClusterStatus defines the observed state of StackitCluster.
 type StackitClusterStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// ready indicates that the infrastructure required for the cluster is ready.
+	// +optional
+	Ready bool `json:"ready,omitempty"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+	// initialization provides Cluster API v1beta2 contract state.
+	// +optional
+	Initialization StackitClusterInitializationStatus `json:"initialization,omitempty"`
+
+	// apiServerEndpoint is the endpoint the Kubernetes API server is reachable at.
+	// +optional
+	APIServerEndpoint clusterv1.APIEndpoint `json:"apiServerEndpoint,omitempty,omitzero"`
+
+	// apiServerLoadBalancerID stores the ID of a provider-managed API server
+	// load balancer so it can be deleted on cluster teardown.
+	// +optional
+	APIServerLoadBalancerID string `json:"apiServerLoadBalancerID,omitempty"`
 
 	// conditions represent the current state of the StackitCluster resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
+// StackitClusterInitializationStatus holds Cluster API initialization state.
+type StackitClusterInitializationStatus struct {
+	// provisioned is true when the cluster infrastructure is provisioned.
+	// +optional
+	Provisioned bool `json:"provisioned,omitempty"`
+}
+
+// Condition types maintained by the StackitClusterReconciler.
+const (
+	ClusterReadyCondition             = "Ready"
+	ClusterNetworkReadyCondition      = "NetworkReady"
+	ClusterLoadBalancerReadyCondition = "LoadBalancerReady"
+	ClusterCredentialsReadyCondition  = "CredentialsReady"
+)
+
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=stackitclusters,shortName=stic,scope=Namespaced,categories=cluster-api
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
 
-// StackitCluster is the Schema for the stackitclusters API
+// StackitCluster is the Schema for the stackitclusters API.
 type StackitCluster struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -82,7 +144,7 @@ type StackitCluster struct {
 
 // +kubebuilder:object:root=true
 
-// StackitClusterList contains a list of StackitCluster
+// StackitClusterList contains a list of StackitCluster.
 type StackitClusterList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`

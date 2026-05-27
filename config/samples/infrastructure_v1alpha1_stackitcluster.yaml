@@ -6,4 +6,11 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: stackitcluster-sample
 spec:
-  # TODO(user): Add fields here
+  projectID: 00000000-0000-0000-0000-000000000000
+  region: eu01
+  credentialsSecretRef:
+    name: stackit-credentials
+  network:
+    id: 11111111-1111-1111-1111-111111111111
+  apiServerLoadBalancer:
+    enabled: true

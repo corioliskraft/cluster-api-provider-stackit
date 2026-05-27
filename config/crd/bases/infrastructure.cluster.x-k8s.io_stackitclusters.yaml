@@ -21,7 +21,7 @@ spec:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: StackitCluster is the Schema for the stackitclusters API
+        description: StackitCluster is the Schema for the stackitclusters API.
         properties:
           apiVersion:
             description: |-
@@ -43,25 +43,116 @@ spec:
           spec:
             description: spec defines the desired state of StackitCluster
             properties:
-              foo:
-                description: foo is an example field of StackitCluster. Edit stackitcluster_types.go
-                  to remove/update
+              apiServerLoadBalancer:
+                description: |-
+                  apiServerLoadBalancer configures the load balancer in front of the
+                  Kubernetes API server.
+                properties:
+                  enabled:
+                    description: enabled toggles creation of an API server load balancer.
+                    type: boolean
+                type: object
+              controlPlaneEndpoint:
+                description: |-
+                  controlPlaneEndpoint allows the user to provide a pre-existing endpoint
+                  when apiServerLoadBalancer.enabled is false.
+                minProperties: 1
+                properties:
+                  host:
+                    description: host is the hostname on which the API server is serving.
+                    maxLength: 512
+                    minLength: 1
+                    type: string
+                  port:
+                    description: port is the port on which the API server is serving.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                type: object
+              credentialsSecretRef:
+                description: credentialsSecretRef references the Secret containing
+                  STACKIT credentials.
+                properties:
+                  name:
+                    description: name is unique within a namespace to reference a
+                      secret resource.
+                    type: string
+                  namespace:
+                    description: namespace defines the space within which the secret
+                      name must be unique.
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              network:
+                description: |-
+                  network references the existing STACKIT network the cluster will use.
+                  For MVP the network must already exist.
+                properties:
+                  id:
+                    description: id is the STACKIT network ID.
+                    minLength: 1
+                    pattern: ^[0-9a-fA-F-]{36}$
+                    type: string
+                required:
+                - id
+                type: object
+              projectID:
+                description: projectID is the STACKIT project that owns the cluster
+                  infrastructure.
+                minLength: 1
+                pattern: ^[0-9a-fA-F-]{36}$
                 type: string
+              region:
+                description: region is the STACKIT region in which infrastructure
+                  is created.
+                minLength: 1
+                pattern: ^[a-z]{2}[0-9]{2}$
+                type: string
+            required:
+            - credentialsSecretRef
+            - network
+            - projectID
+            - region
             type: object
+            x-kubernetes-validations:
+            - message: credentialsSecretRef.name is required
+              rule: has(self.credentialsSecretRef.name) && size(self.credentialsSecretRef.name)
+                > 0
+            - message: controlPlaneEndpoint.host is required when apiServerLoadBalancer.enabled
+                is false
+              rule: 'has(self.apiServerLoadBalancer) && has(self.apiServerLoadBalancer.enabled)
+                && self.apiServerLoadBalancer.enabled ? true : has(self.controlPlaneEndpoint)
+                && has(self.controlPlaneEndpoint.host) && size(self.controlPlaneEndpoint.host)
+                > 0'
           status:
             description: status defines the observed state of StackitCluster
             properties:
-              conditions:
+              apiServerEndpoint:
+                description: apiServerEndpoint is the endpoint the Kubernetes API
+                  server is reachable at.
+                minProperties: 1
+                properties:
+                  host:
+                    description: host is the hostname on which the API server is serving.
+                    maxLength: 512
+                    minLength: 1
+                    type: string
+                  port:
+                    description: port is the port on which the API server is serving.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                type: object
+              apiServerLoadBalancerID:
                 description: |-
-                  conditions represent the current state of the StackitCluster resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                  apiServerLoadBalancerID stores the ID of a provider-managed API server
+                  load balancer so it can be deleted on cluster teardown.
+                type: string
+              conditions:
+                description: conditions represent the current state of the StackitCluster
+                  resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -120,6 +211,19 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              initialization:
+                description: initialization provides Cluster API v1beta2 contract
+                  state.
+                properties:
+                  provisioned:
+                    description: provisioned is true when the cluster infrastructure
+                      is provisioned.
+                    type: boolean
+                type: object
+              ready:
+                description: ready indicates that the infrastructure required for
+                  the cluster is ready.
+                type: boolean
             type: object
         required:
         - spec

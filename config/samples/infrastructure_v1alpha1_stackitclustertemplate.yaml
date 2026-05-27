@@ -6,4 +6,13 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: stackitclustertemplate-sample
 spec:
-  # TODO(user): Add fields here
+  template:
+    spec:
+      projectID: 00000000-0000-0000-0000-000000000000
+      region: eu01
+      credentialsSecretRef:
+        name: stackit-credentials
+      network:
+        id: 11111111-1111-1111-1111-111111111111
+      apiServerLoadBalancer:
+        enabled: true

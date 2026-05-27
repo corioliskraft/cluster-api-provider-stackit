@@ -33,7 +33,7 @@ import (
 
 var (
 	// managerImage is the manager image to be built and loaded for testing.
-	managerImage = "example.com/cluster-api-provider-stackit:v0.0.1"
+	managerImage = envDefault("E2E_MANAGER_IMAGE", "example.com/cluster-api-provider-stackit:v0.0.1")
 	// shouldCleanupCertManager tracks whether CertManager was installed by this suite.
 	shouldCleanupCertManager = false
 )
@@ -64,6 +64,7 @@ var _ = BeforeSuite(func() {
 
 	configureKubectlKubeRC()
 	setupCertManager()
+	setupClusterAPI()
 })
 
 var _ = AfterSuite(func() {
@@ -104,6 +105,13 @@ func setupCertManager() {
 
 	By("installing CertManager")
 	Expect(utils.InstallCertManager()).To(Succeed(), "Failed to install CertManager")
+}
+
+func setupClusterAPI() {
+	By("installing Cluster API providers")
+	cmd := exec.Command("clusterctl", "init", "--core", "cluster-api", "--bootstrap", "kubeadm", "--control-plane", "kubeadm")
+	_, err := utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install Cluster API providers")
 }
 
 // teardownCertManager uninstalls CertManager if it was installed by setupCertManager.

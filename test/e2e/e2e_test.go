@@ -20,16 +20,20 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud"
 	"voigt.tngl.sh/cluster-api-provider-stackit/test/utils"
 )
 
@@ -52,10 +56,14 @@ var _ = Describe("Manager", Ordered, func() {
 	// enforce the restricted security policy to the namespace, installing CRDs,
 	// and deploying the controller.
 	BeforeAll(func() {
-		By("creating manager namespace")
-		cmd := exec.Command("kubectl", "create", "ns", namespace)
-		_, err := utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
+		By("ensuring manager namespace exists")
+		cmd := exec.Command("kubectl", "get", "ns", namespace)
+		var err error
+		if _, err := utils.Run(cmd); err != nil {
+			cmd = exec.Command("kubectl", "create", "ns", namespace)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
+		}
 
 		By("labeling the namespace to enforce the restricted security policy")
 		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
@@ -270,17 +278,290 @@ var _ = Describe("Manager", Ordered, func() {
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput, err := getMetricsOutput()
-		// Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+		It("should create and delete a real STACKIT VM for a workload Cluster Machine", func() {
+			if os.Getenv("STACKIT_E2E_CREATE_VMS") != "true" {
+				Skip("set STACKIT_E2E_CREATE_VMS=true to run the real STACKIT VM lifecycle e2e test")
+			}
+
+			cfg := stackitVMConfigFromEnv()
+			ctx := context.Background()
+			cloudClient := stackitCloudClientFromCredentialsSecret(ctx, cfg)
+			clusterName := fmt.Sprintf("stackit-e2e-%d", time.Now().Unix())
+			machineName := clusterName + "-machine-0"
+
+			By("applying a workload Cluster and StackitMachine fixture")
+			fixture := renderStackitVMFixture(clusterName, machineName, cfg)
+			fixturePath := writeTempManifest("stackit-vm-e2e-*.yaml", fixture)
+			defer func() {
+				cleanupStackitVMFixture(clusterName, machineName, cfg.Namespace)
+				_ = os.Remove(fixturePath)
+			}()
+
+			cmd := exec.Command("kubectl", "apply", "-f", fixturePath)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply STACKIT VM lifecycle fixture")
+
+			By("waiting for the StackitCluster to validate credentials and network")
+			Eventually(func(g Gomega) {
+				output := kubectlOutput(g, "get", "stackitcluster", clusterName, "-n", cfg.Namespace, "-o", "jsonpath={.status.ready}")
+				g.Expect(output).To(Equal("true"))
+			}, 10*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("waiting for the StackitMachine to provision a VM")
+			var instanceID string
+			Eventually(func(g Gomega) {
+				ready := kubectlOutput(g, "get", "stackitmachine", machineName, "-n", cfg.Namespace, "-o", "jsonpath={.status.ready}")
+				g.Expect(ready).To(Equal("true"))
+				instanceID = kubectlOutput(g, "get", "stackitmachine", machineName, "-n", cfg.Namespace, "-o", "jsonpath={.status.instanceID}")
+				g.Expect(instanceID).NotTo(BeEmpty())
+			}, 25*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("verifying the VM exists in STACKIT")
+			Eventually(func(g Gomega) {
+				server, err := cloudClient.GetServer(ctx, instanceID)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(server.ID).To(Equal(instanceID))
+			}, 5*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("deleting the StackitMachine to trigger VM cleanup")
+			cmd = exec.Command("kubectl", "delete", "stackitmachine", machineName, "-n", cfg.Namespace, "--wait=true", "--timeout=20m")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to delete StackitMachine")
+
+			By("verifying the VM was deleted from STACKIT")
+			Eventually(func(g Gomega) {
+				_, err := cloudClient.GetServer(ctx, instanceID)
+				g.Expect(cloud.IsNotFound(err)).To(BeTrue(), "expected server %s to be deleted, got %v", instanceID, err)
+			}, 20*time.Minute, 15*time.Second).Should(Succeed())
+		})
 	})
 })
+
+type stackitVMConfig struct {
+	Namespace             string
+	ProjectID             string
+	Region                string
+	NetworkID             string
+	ImageID               string
+	MachineType           string
+	AvailabilityZone      string
+	SSHKeyName            string
+	SecurityGroupIDs      []string
+	CredentialsSecretName string
+	CredentialsSecretNS   string
+	RootVolumeSizeGiB     string
+	RootVolumePerformance string
+}
+
+func stackitVMConfigFromEnv() stackitVMConfig {
+	return stackitVMConfig{
+		Namespace:             envDefault("STACKIT_E2E_NAMESPACE", "default"),
+		ProjectID:             requiredEnv("STACKIT_PROJECT_ID"),
+		Region:                envDefault("STACKIT_REGION", "eu01"),
+		NetworkID:             requiredEnv("STACKIT_NETWORK_ID"),
+		ImageID:               requiredEnv("STACKIT_IMAGE_ID"),
+		MachineType:           requiredEnv("STACKIT_MACHINE_TYPE"),
+		AvailabilityZone:      requiredEnv("STACKIT_AVAILABILITY_ZONE"),
+		SSHKeyName:            os.Getenv("STACKIT_SSH_KEY_NAME"),
+		SecurityGroupIDs:      splitCSV(os.Getenv("STACKIT_SECURITY_GROUP_IDS")),
+		CredentialsSecretName: envDefault("STACKIT_CREDENTIALS_SECRET_NAME", "stackit-credentials"),
+		CredentialsSecretNS:   envDefault("STACKIT_CREDENTIALS_SECRET_NAMESPACE", envDefault("STACKIT_E2E_NAMESPACE", "default")),
+		RootVolumeSizeGiB:     envDefault("STACKIT_ROOT_VOLUME_SIZE_GIB", "50"),
+		RootVolumePerformance: envDefault("STACKIT_ROOT_VOLUME_PERFORMANCE_CLASS", "storage_premium_perf6"),
+	}
+}
+
+func stackitCloudClientFromCredentialsSecret(ctx context.Context, cfg stackitVMConfig) cloud.Client {
+	secret := stackitCredentialsSecret(ctx, cfg.CredentialsSecretName, cfg.CredentialsSecretNS)
+	serviceAccountJSON, ok := secret["serviceaccount.json"]
+	Expect(ok).To(BeTrue(), "credentials Secret is missing serviceaccount.json")
+	Expect(serviceAccountJSON).NotTo(BeEmpty(), "credentials Secret serviceaccount.json is empty")
+
+	client, err := cloud.NewClient(ctx, cloud.Credentials{
+		ProjectID:          cfg.ProjectID,
+		Region:             cfg.Region,
+		ServiceAccountJSON: serviceAccountJSON,
+	})
+	Expect(err).NotTo(HaveOccurred(), "Failed to create STACKIT cloud client")
+	return client
+}
+
+func stackitCredentialsSecret(_ context.Context, name, namespace string) map[string][]byte {
+	cmd := exec.Command("kubectl", "get", "secret", name, "-n", namespace, "-o", "json")
+	output, err := utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to read STACKIT credentials Secret")
+
+	var secret struct {
+		Data map[string]string `json:"data"`
+	}
+	Expect(json.Unmarshal([]byte(output), &secret)).To(Succeed())
+	out := map[string][]byte{}
+	for key, value := range secret.Data {
+		decoded, err := base64.StdEncoding.DecodeString(value)
+		Expect(err).NotTo(HaveOccurred(), "Failed to decode Secret key %s", key)
+		out[key] = decoded
+	}
+	return out
+}
+
+func renderStackitVMFixture(clusterName, machineName string, cfg stackitVMConfig) string {
+	securityGroups := ""
+	for _, securityGroupID := range cfg.SecurityGroupIDs {
+		securityGroups += fmt.Sprintf("\n        - %s", securityGroupID)
+	}
+	if securityGroups != "" {
+		securityGroups = "\n      securityGroups:" + securityGroups
+	}
+
+	sshKeyName := ""
+	if cfg.SSHKeyName != "" {
+		sshKeyName = fmt.Sprintf("\n      sshKeyName: %s", cfg.SSHKeyName)
+	}
+
+	return fmt.Sprintf(`apiVersion: cluster.x-k8s.io/v1beta2
+kind: Cluster
+metadata:
+  name: %[1]s
+  namespace: %[3]s
+spec:
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: StackitCluster
+    name: %[1]s
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        - 192.168.0.0/16
+    services:
+      cidrBlocks:
+        - 10.128.0.0/12
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitCluster
+metadata:
+  name: %[1]s
+  namespace: %[3]s
+spec:
+  projectID: %[4]s
+  region: %[5]s
+  credentialsSecretRef:
+    name: %[6]s
+    namespace: %[7]s
+  network:
+    id: %[8]s
+  apiServerLoadBalancer:
+    enabled: false
+  controlPlaneEndpoint:
+    host: 203.0.113.10
+    port: 6443
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: %[2]s-bootstrap
+  namespace: %[3]s
+type: Opaque
+data:
+  value: IyEvYmluL3NoCmVjaG8gc3RhY2tpdC1lMmUK
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Machine
+metadata:
+  name: %[2]s
+  namespace: %[3]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+spec:
+  clusterName: %[1]s
+  bootstrap:
+    dataSecretName: %[2]s-bootstrap
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: StackitMachine
+    name: %[2]s
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitMachine
+metadata:
+  name: %[2]s
+  namespace: %[3]s
+spec:
+  imageID: %[9]s
+  machineType: %[10]s
+  availabilityZone: %[11]s%[12]s
+  rootVolume:
+    sizeGiB: %[13]s
+    performanceClass: %[14]s
+    deleteOnTermination: true
+  network:
+    id: %[8]s%[15]s
+`, clusterName, machineName, cfg.Namespace, cfg.ProjectID, cfg.Region, cfg.CredentialsSecretName, cfg.CredentialsSecretNS,
+		cfg.NetworkID, cfg.ImageID, cfg.MachineType, cfg.AvailabilityZone, sshKeyName, cfg.RootVolumeSizeGiB,
+		cfg.RootVolumePerformance, securityGroups)
+}
+
+func cleanupStackitVMFixture(clusterName, machineName, namespace string) {
+	for _, args := range [][]string{
+		{"delete", "stackitmachine", machineName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=20m"},
+		{"delete", "machine", machineName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=5m"},
+		{"delete", "stackitcluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=5m"},
+		{"delete", "cluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=5m"},
+		{"delete", "secret", machineName + "-bootstrap", "-n", namespace, "--ignore-not-found"},
+	} {
+		cmd := exec.Command("kubectl", args...)
+		if _, err := utils.Run(cmd); err != nil {
+			_, _ = fmt.Fprintf(GinkgoWriter, "cleanup warning: %v\n", err)
+		}
+	}
+}
+
+func writeTempManifest(pattern, content string) string {
+	file, err := os.CreateTemp("", pattern)
+	Expect(err).NotTo(HaveOccurred(), "Failed to create temporary manifest")
+	defer func() {
+		Expect(file.Close()).To(Succeed())
+	}()
+	_, err = file.WriteString(content)
+	Expect(err).NotTo(HaveOccurred(), "Failed to write temporary manifest")
+	return file.Name()
+}
+
+func kubectlOutput(g Gomega, args ...string) string {
+	cmd := exec.Command("kubectl", args...)
+	output, err := utils.Run(cmd)
+	g.Expect(err).NotTo(HaveOccurred())
+	return strings.TrimSpace(output)
+}
+
+func requiredEnv(name string) string {
+	value := os.Getenv(name)
+	if value == "" {
+		Skip(fmt.Sprintf("%s is required for STACKIT VM e2e tests", name))
+	}
+	return value
+}
+
+func envDefault(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func splitCSV(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
 
 // serviceAccountToken returns a token for the specified service account in the given namespace.
 // It uses the Kubernetes TokenRequest API to generate a token by directly sending a request

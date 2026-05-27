@@ -72,6 +72,19 @@ Wichtig: nutze jj bookmarks um die Entwicklungschritte sauber voneinander abzugr
 
 ---
 
+## 2. Wichtige Referenzen
+
+Der Agent soll diese Projekte als Referenzen verwenden:
+
+```text
+/Users/c.voigt/go/src/tangled.org/voigt.tngl.sh/cloud-provider-stackit
+/Users/c.voigt/go/src/tangled.org/voigt.tngl.sh/machine-controller-manager-provider-stackit
+/Users/c.voigt/go/src/tangled.org/voigt.tngl.sh/cluster-api
+/Users/c.voigt/go/src/tangled.org/voigt.tngl.sh/stackit-sdk-go
+```
+
+---
+
 ## PR 1: CAPI Contract Audit und Fixes
 
 ### Ziel

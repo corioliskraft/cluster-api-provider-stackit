@@ -73,9 +73,10 @@
   - [x] Ensure conditions include observedGeneration and specific reasons.
   - [x] Regenerate CRDs/deepcopy and run unit/envtest coverage.
 - [ ] PR 2: Re-verify providerID compatibility with `cloud-provider-stackit`.
-  - [ ] Confirm providerID format, generation, parsing, and node matching against upstream cloud provider behavior.
-  - [ ] Keep `NewProviderID`, `ParseProviderID`, round-trip, and cloud-provider-format tests green.
+  - [x] Confirm providerID format, generation, parsing, and node matching against upstream cloud provider behavior.
+  - [x] Keep `NewProviderID`, `ParseProviderID`, round-trip, and cloud-provider-format tests green.
   - [ ] Validate StackitMachine, Machine, and Node providerID alignment in a real workload cluster.
+    Static compatibility is verified; real NodeRef validation depends on PR 3 installing `cloud-provider-stackit` in the workload cluster.
 - [ ] PR 3: Integrate `cloud-provider-stackit` as an optional workload-cluster addon.
   - [ ] Add addon manifests for the STACKIT cloud controller manager and required RBAC/config references.
   - [ ] Prepare the workload cluster template for an external cloud provider.

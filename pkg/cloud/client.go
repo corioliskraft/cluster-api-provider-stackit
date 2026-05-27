@@ -27,6 +27,8 @@ type Client interface {
 
 	FindServerByTags(ctx context.Context, tags map[string]string) (*Server, error)
 
+	ListServersByTags(ctx context.Context, tags map[string]string) ([]*Server, error)
+
 	CreateServer(ctx context.Context, input CreateServerInput) (*Server, error)
 
 	DeleteServer(ctx context.Context, id string) error
@@ -34,6 +36,8 @@ type Client interface {
 	GetNetwork(ctx context.Context, id string) (*Network, error)
 
 	EnsureAPIServerLoadBalancer(ctx context.Context, input LoadBalancerInput) (*LoadBalancer, error)
+
+	ListAPIServerLoadBalancersByTags(ctx context.Context, tags map[string]string) ([]*LoadBalancer, error)
 
 	EnsureAPIServerLoadBalancerTarget(ctx context.Context, input LoadBalancerTargetInput) error
 

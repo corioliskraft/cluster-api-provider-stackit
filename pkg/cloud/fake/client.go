@@ -118,6 +118,22 @@ func (c *Client) FindServerByTags(_ context.Context, tags map[string]string) (*c
 	return nil, fmt.Errorf("no server matching tags: %w", cloud.ErrNotFound)
 }
 
+func (c *Client) ListServersByTags(_ context.Context, tags map[string]string) ([]*cloud.Server, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("empty tags: %w", cloud.ErrInvalidInput)
+	}
+	servers := []*cloud.Server{}
+	for _, entry := range c.servers {
+		if mapContains(entry.tags, tags) {
+			servers = append(servers, cloneServer(entry.server))
+		}
+	}
+	return servers, nil
+}
+
 // CreateServer creates a server. To satisfy spec section 20 (idempotency),
 // it returns the existing server if one with matching tags already exists.
 func (c *Client) CreateServer(_ context.Context, input cloud.CreateServerInput) (*cloud.Server, error) {
@@ -201,6 +217,23 @@ func (c *Client) EnsureAPIServerLoadBalancer(_ context.Context, input cloud.Load
 	c.loadBalancers[id] = &lbEntry{lb: lb, tags: copyTags(input.Tags), targets: targets}
 	out := *lb
 	return &out, nil
+}
+
+func (c *Client) ListAPIServerLoadBalancersByTags(_ context.Context, tags map[string]string) ([]*cloud.LoadBalancer, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("empty tags: %w", cloud.ErrInvalidInput)
+	}
+	loadBalancers := []*cloud.LoadBalancer{}
+	for _, entry := range c.loadBalancers {
+		if mapContains(entry.tags, tags) {
+			out := *entry.lb
+			loadBalancers = append(loadBalancers, &out)
+		}
+	}
+	return loadBalancers, nil
 }
 
 func (c *Client) EnsureAPIServerLoadBalancerTarget(_ context.Context, input cloud.LoadBalancerTargetInput) error {

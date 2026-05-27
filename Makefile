@@ -94,6 +94,10 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
+.PHONY: cleanup-stackit
+cleanup-stackit: ## Delete STACKIT e2e resources by STACKIT API labels. Requires STACKIT_E2E_TEST_ID.
+	go run ./cmd/cleanup-stackit
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	"$(GOLANGCI_LINT)" run

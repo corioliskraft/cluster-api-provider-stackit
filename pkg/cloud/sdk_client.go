@@ -104,6 +104,20 @@ func (c *SDKClient) GetServer(ctx context.Context, id string) (*Server, error) {
 }
 
 func (c *SDKClient) FindServerByTags(ctx context.Context, tags map[string]string) (*Server, error) {
+	servers, err := c.ListServersByTags(ctx, tags)
+	if err != nil {
+		return nil, err
+	}
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("%w: no server matching tags", ErrNotFound)
+	}
+	if len(servers) > 1 {
+		return nil, fmt.Errorf("%w: multiple servers matching tags", ErrConflict)
+	}
+	return servers[0], nil
+}
+
+func (c *SDKClient) ListServersByTags(ctx context.Context, tags map[string]string) ([]*Server, error) {
 	if len(tags) == 0 {
 		return nil, fmt.Errorf("%w: empty tag selector", ErrInvalidInput)
 	}
@@ -114,19 +128,14 @@ func (c *SDKClient) FindServerByTags(ctx context.Context, tags map[string]string
 	if err != nil {
 		return nil, classifySDKError("list servers", err)
 	}
-	var matched []iaas.Server
+	matched := []*Server{}
 	for _, server := range resp.GetItems() {
 		if labelsContainTags(server.GetLabels(), tags) {
-			matched = append(matched, server)
+			server := server
+			matched = append(matched, c.serverFromSDK(ctx, &server))
 		}
 	}
-	if len(matched) == 0 {
-		return nil, fmt.Errorf("%w: no server matching tags", ErrNotFound)
-	}
-	if len(matched) > 1 {
-		return nil, fmt.Errorf("%w: multiple servers matching tags", ErrConflict)
-	}
-	return c.serverFromSDK(ctx, &matched[0]), nil
+	return matched, nil
 }
 
 func (c *SDKClient) CreateServer(ctx context.Context, input CreateServerInput) (*Server, error) {
@@ -266,6 +275,28 @@ func (c *SDKClient) DeleteAPIServerLoadBalancer(ctx context.Context, id string) 
 	return nil
 }
 
+func (c *SDKClient) ListAPIServerLoadBalancersByTags(ctx context.Context, tags map[string]string) ([]*LoadBalancer, error) {
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("%w: empty tag selector", ErrInvalidInput)
+	}
+	resp, err := c.lbClient.DefaultAPI.ListLoadBalancers(ctx, c.projectID, c.region).Execute()
+	if err != nil {
+		err := classifySDKError("list load balancers", err)
+		if isLoadBalancerServiceNotEnabled(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	matched := []*LoadBalancer{}
+	for _, candidate := range resp.GetLoadBalancers() {
+		if mapContains(candidate.GetLabels(), tags) {
+			candidate := candidate
+			matched = append(matched, loadBalancerFromSDK(&candidate))
+		}
+	}
+	return matched, nil
+}
+
 func (c *SDKClient) EnsureAPIServerLoadBalancerTarget(ctx context.Context, input LoadBalancerTargetInput) error {
 	if input.LoadBalancerID == "" || input.Name == "" || input.IP == "" {
 		return fmt.Errorf("%w: load balancer ID, target name, and target IP are required", ErrInvalidInput)
@@ -328,18 +359,9 @@ func (c *SDKClient) DeleteAPIServerLoadBalancerTarget(ctx context.Context, input
 }
 
 func (c *SDKClient) findLoadBalancerByTags(ctx context.Context, tags map[string]string) (*LoadBalancer, error) {
-	if len(tags) == 0 {
-		return nil, fmt.Errorf("%w: empty tag selector", ErrInvalidInput)
-	}
-	resp, err := c.lbClient.DefaultAPI.ListLoadBalancers(ctx, c.projectID, c.region).Execute()
+	matched, err := c.ListAPIServerLoadBalancersByTags(ctx, tags)
 	if err != nil {
-		return nil, classifySDKError("list load balancers", err)
-	}
-	var matched []lb.LoadBalancer
-	for _, candidate := range resp.GetLoadBalancers() {
-		if mapContains(candidate.GetLabels(), tags) {
-			matched = append(matched, candidate)
-		}
+		return nil, err
 	}
 	if len(matched) == 0 {
 		return nil, fmt.Errorf("%w: no load balancer matching tags", ErrNotFound)
@@ -347,7 +369,7 @@ func (c *SDKClient) findLoadBalancerByTags(ctx context.Context, tags map[string]
 	if len(matched) > 1 {
 		return nil, fmt.Errorf("%w: multiple load balancers matching tags", ErrConflict)
 	}
-	return loadBalancerFromSDK(&matched[0]), nil
+	return matched[0], nil
 }
 
 func (c *SDKClient) updateAPIServerTargetPool(

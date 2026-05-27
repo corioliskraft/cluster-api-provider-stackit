@@ -66,5 +66,36 @@
 
 ## Missing
 
+- [ ] PR 1: Audit and fix Cluster API infrastructure provider contract behavior.
+  - [ ] Verify StackitCluster contract fields, status, conditions, finalizer, owner references, paused handling, and observedGeneration.
+  - [ ] Verify StackitMachine contract fields, `spec.providerID`, status, conditions, finalizer, owner references, paused handling, and observedGeneration.
+  - [ ] Ensure paused Clusters or paused objects do not trigger cloud API calls.
+  - [ ] Ensure conditions include observedGeneration and specific reasons.
+  - [ ] Regenerate CRDs/deepcopy and run unit/envtest coverage.
+- [ ] PR 2: Re-verify providerID compatibility with `cloud-provider-stackit`.
+  - [ ] Confirm providerID format, generation, parsing, and node matching against upstream cloud provider behavior.
+  - [ ] Keep `NewProviderID`, `ParseProviderID`, round-trip, and cloud-provider-format tests green.
+  - [ ] Validate StackitMachine, Machine, and Node providerID alignment in a real workload cluster.
+- [ ] PR 3: Integrate `cloud-provider-stackit` as an optional workload-cluster addon.
+  - [ ] Add addon manifests for the STACKIT cloud controller manager and required RBAC/config references.
+  - [ ] Prepare the workload cluster template for an external cloud provider.
+  - [ ] Verify the addon can be applied by e2e tests and nodes become Ready.
+- [ ] PR 4: Add reproducible create/delete e2e coverage with leak cleanup.
+  - [ ] Create a 1 control-plane / 1 worker cluster.
+  - [ ] Delete the cluster and assert no Machines, StackitMachines, VMs, load balancers, or finalizer leaks remain.
+  - [ ] Add `make cleanup-stackit` backed by direct STACKIT API cleanup using required test tags.
+- [ ] PR 5: Add clusterctl release packaging.
+  - [ ] Generate `infrastructure-components.yaml`, `metadata.yaml`, `cluster-template.yaml`, and `cluster-template-development.yaml`.
+  - [ ] Verify `clusterctl init --infrastructure stackit` and `clusterctl generate cluster`.
+- [ ] PR 6: Add worker scale e2e coverage.
+  - [ ] Scale workers from 1 to 3 and back to 1.
+  - [ ] Verify providerIDs, node readiness/removal, and no orphaned cloud resources.
+- [ ] PR 7: Add Kubernetes upgrade e2e coverage.
+  - [ ] Exercise KubeadmControlPlane and MachineDeployment rolling upgrades.
+  - [ ] Verify replacement VMs become Ready and old VMs are deleted.
+- [ ] PR 8: Model STACKIT availability zones as CAPI FailureDomains.
+  - [ ] Publish failureDomains in StackitCluster status.
+  - [ ] Validate StackitMachine availability zones and preserve single-AZ templates.
+- [ ] PR 9: Add ClusterClass support.
+  - [ ] Add ClusterClass and topology templates after create/delete, scale, and upgrade flows are stable.
 - [ ] Decide on release/distribution flow: installer YAML, Helm chart, or both.
-- [ ] Commit the current working set once the next checkpoint is reviewed.

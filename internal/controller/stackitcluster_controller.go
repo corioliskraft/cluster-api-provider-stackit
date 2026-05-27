@@ -18,46 +18,217 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	clusterutil "sigs.k8s.io/cluster-api/util"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	infrastructurev1alpha1 "voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1"
+	infrav1 "voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1"
+	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud"
+	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/scope"
+	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/util"
 )
 
-// StackitClusterReconciler reconciles a StackitCluster object
+// defaultAPIServerPort is used when an LB is created without an explicit port.
+const defaultAPIServerPort int32 = 6443
+
+// StackitClusterReconciler reconciles a StackitCluster object.
 type StackitClusterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// CloudClientFactory builds a cloud.Client from parsed credentials. It is
+	// injected so tests can swap in the in-memory fake.
+	CloudClientFactory cloud.Factory
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=stackitclusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=stackitclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=stackitclusters/finalizers,verbs=update
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the StackitCluster object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.3/pkg/reconcile
-func (r *StackitClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+// Reconcile implements the spec section 18 flow.
+func (r *StackitClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, err error) {
+	log := logf.FromContext(ctx)
 
-	// TODO(user): your logic here
+	stackitCluster := &infrav1.StackitCluster{}
+	if err := r.Get(ctx, req.NamespacedName, stackitCluster); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
 
+	cluster, err := clusterutil.GetOwnerCluster(ctx, r.Client, stackitCluster.ObjectMeta)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("get owner cluster: %w", err)
+	}
+	if cluster == nil {
+		log.Info("StackitCluster has no owning Cluster yet, requeueing")
+		return ctrl.Result{}, nil
+	}
+
+	clusterScope, err := scope.NewClusterScope(r.Client, cluster, stackitCluster)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("create cluster scope: %w", err)
+	}
+	defer func() {
+		if patchErr := clusterScope.PatchObject(ctx); patchErr != nil && err == nil {
+			err = patchErr
+		}
+	}()
+
+	if !stackitCluster.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, clusterScope)
+	}
+	return r.reconcileNormal(ctx, clusterScope)
+}
+
+func (r *StackitClusterReconciler) reconcileNormal(ctx context.Context, s *scope.ClusterScope) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	sc := s.StackitCluster
+
+	if !controllerutil.ContainsFinalizer(sc, infrav1.ClusterFinalizer) {
+		controllerutil.AddFinalizer(sc, infrav1.ClusterFinalizer)
+	}
+
+	cloudClient, err := r.buildCloudClient(ctx, sc)
+	if err != nil {
+		sc.Status.Ready = false
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterCredentialsReadyCondition,
+			metav1.ConditionFalse, "CredentialsInvalid", err.Error())
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
+			metav1.ConditionFalse, "CredentialsInvalid", err.Error())
+		// Auth/invalid input errors should not aggressively requeue.
+		if cloud.IsUnauthorized(err) || cloud.IsInvalidInput(err) || errors.Is(err, util.ErrCredentialsInvalid) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+	util.SetCondition(&sc.Status.Conditions, infrav1.ClusterCredentialsReadyCondition,
+		metav1.ConditionTrue, "Available", "")
+
+	if _, err := cloudClient.GetNetwork(ctx, sc.Spec.Network.ID); err != nil {
+		sc.Status.Ready = false
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterNetworkReadyCondition,
+			metav1.ConditionFalse, "NetworkNotFound", err.Error())
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
+			metav1.ConditionFalse, "NetworkNotFound", err.Error())
+		if cloud.IsRetryable(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, nil
+	}
+	util.SetCondition(&sc.Status.Conditions, infrav1.ClusterNetworkReadyCondition,
+		metav1.ConditionTrue, "Available", "")
+
+	if sc.Spec.APIServerLoadBalancer.Enabled {
+		if sc.Status.APIServerLoadBalancerID == "" {
+			if sc.Spec.ControlPlaneEndpoint.Host != "" {
+				sc.Status.APIServerEndpoint = sc.Spec.ControlPlaneEndpoint
+			}
+			util.SetCondition(&sc.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition,
+				metav1.ConditionFalse, "Provisioning", "waiting for first control-plane machine target")
+		}
+	} else if sc.Spec.ControlPlaneEndpoint.Host != "" {
+		sc.Status.APIServerEndpoint = sc.Spec.ControlPlaneEndpoint
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition,
+			metav1.ConditionTrue, "Skipped", "external endpoint provided")
+	} else {
+		sc.Status.Ready = false
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition,
+			metav1.ConditionFalse, "EndpointMissing", "apiServerLoadBalancer.enabled is false and controlPlaneEndpoint is empty")
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
+			metav1.ConditionFalse, "EndpointMissing", "apiServerLoadBalancer.enabled is false and controlPlaneEndpoint is empty")
+		return ctrl.Result{}, nil
+	}
+
+	sc.Status.Ready = true
+	sc.Status.Initialization.Provisioned = true
+	util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
+		metav1.ConditionTrue, "Available", "")
+	log.V(1).Info("StackitCluster ready", "endpoint", sc.Status.APIServerEndpoint)
 	return ctrl.Result{}, nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
+func (r *StackitClusterReconciler) reconcileDelete(ctx context.Context, s *scope.ClusterScope) (ctrl.Result, error) {
+	sc := s.StackitCluster
+	if sc.Status.APIServerLoadBalancerID != "" {
+		cloudClient, err := r.buildCloudClient(ctx, sc)
+		if err != nil {
+			// If we cannot reach the cloud during delete, surface the condition
+			// but do not block forever; finalizer removal is gated on the LB
+			// deletion succeeding (or being already absent).
+			util.SetCondition(&sc.Status.Conditions, infrav1.ClusterCredentialsReadyCondition,
+				metav1.ConditionFalse, "CredentialsInvalid", err.Error())
+			return ctrl.Result{}, err
+		}
+		if err := cloudClient.DeleteAPIServerLoadBalancer(ctx, sc.Status.APIServerLoadBalancerID); err != nil && !cloud.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		sc.Status.APIServerLoadBalancerID = ""
+	}
+	controllerutil.RemoveFinalizer(sc, infrav1.ClusterFinalizer)
+	return ctrl.Result{}, nil
+}
+
+func (r *StackitClusterReconciler) buildCloudClient(ctx context.Context, sc *infrav1.StackitCluster) (cloud.Client, error) {
+	if r.CloudClientFactory == nil {
+		return nil, errors.New("CloudClientFactory is not configured")
+	}
+	secret := &corev1.Secret{}
+	ns := sc.Spec.CredentialsSecretRef.Namespace
+	if ns == "" {
+		ns = sc.Namespace
+	}
+	key := types.NamespacedName{Namespace: ns, Name: sc.Spec.CredentialsSecretRef.Name}
+	if err := r.Get(ctx, key, secret); err != nil {
+		return nil, fmt.Errorf("get credentials secret %s: %w", key, err)
+	}
+	creds, err := util.ParseCredentialsSecret(secret, sc.Spec.ProjectID, sc.Spec.Region)
+	if err != nil {
+		return nil, err
+	}
+	return r.CloudClientFactory(ctx, creds)
+}
+
+func (r *StackitClusterReconciler) stackitClusterRequestsForCluster(_ context.Context, obj client.Object) []reconcile.Request {
+	cluster, ok := obj.(*clusterv1.Cluster)
+	if !ok || !isStackitClusterRef(cluster.Spec.InfrastructureRef) {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Namespace: cluster.Namespace,
+			Name:      cluster.Spec.InfrastructureRef.Name,
+		},
+	}}
+}
+
+func isStackitClusterRef(ref clusterv1.ContractVersionedObjectReference) bool {
+	return ref.APIGroup == infrav1.GroupVersion.Group &&
+		ref.Kind == "StackitCluster" &&
+		ref.Name != ""
+}
+
+// SetupWithManager registers the controller with the manager.
 func (r *StackitClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&infrastructurev1alpha1.StackitCluster{}).
+		For(&infrav1.StackitCluster{}).
+		Watches(&clusterv1.Cluster{}, handler.EnqueueRequestsFromMapFunc(r.stackitClusterRequestsForCluster)).
 		Named("stackitcluster").
 		Complete(r)
 }

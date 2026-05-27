@@ -78,8 +78,8 @@
   - [ ] Validate StackitMachine, Machine, and Node providerID alignment in a real workload cluster.
     Static compatibility is verified; real NodeRef validation depends on PR 3 installing `cloud-provider-stackit` in the workload cluster.
 - [ ] PR 3: Integrate `cloud-provider-stackit` as an optional workload-cluster addon.
-  - [ ] Add addon manifests for the STACKIT cloud controller manager and required RBAC/config references.
-  - [ ] Prepare the workload cluster template for an external cloud provider.
+  - [x] Add addon manifests for the STACKIT cloud controller manager and required RBAC/config references.
+  - [x] Prepare the workload cluster template for an external cloud provider.
   - [ ] Verify the addon can be applied by e2e tests and nodes become Ready.
 - [ ] PR 4: Add reproducible create/delete e2e coverage with leak cleanup.
   - [ ] Create a 1 control-plane / 1 worker cluster.

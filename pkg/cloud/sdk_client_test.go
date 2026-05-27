@@ -136,7 +136,10 @@ func TestSDKClientEnsureAPIServerLoadBalancerCreatesExpectedPayload(t *testing.T
 			Name: "cp-0",
 			IP:   "10.0.0.10",
 		}},
-		Tags: map[string]string{"cluster": "test"},
+		Tags: map[string]string{
+			"cluster.x-k8s.io/cluster-name":        "test",
+			"cluster-api-provider-stackit/test-id": "run-1",
+		},
 	})
 	if err != nil {
 		t.Fatalf("EnsureAPIServerLoadBalancer() error = %v", err)
@@ -147,7 +150,8 @@ func TestSDKClientEnsureAPIServerLoadBalancerCreatesExpectedPayload(t *testing.T
 
 	assertStringField(t, createPayload, "name", "apiserver-test")
 	assertStringField(t, createPayload, "region", testSDKRegion)
-	assertNestedStringField(t, createPayload, []string{"labels", "cluster"}, "test")
+	assertNestedStringField(t, createPayload, []string{"labels", "cluster.x-k8s.io.cluster-name"}, "test")
+	assertNestedStringField(t, createPayload, []string{"labels", "cluster-api-provider-stackit.test-id"}, "run-1")
 	assertNestedBoolField(t, createPayload, []string{"options", "ephemeralAddress"}, true)
 	assertNestedStringField(t, createPayload, []string{"networks", "0", "networkId"}, testSDKNetworkID)
 	assertNestedStringField(t, createPayload, []string{"networks", "0", "role"}, "ROLE_LISTENERS_AND_TARGETS")

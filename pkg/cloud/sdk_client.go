@@ -228,7 +228,7 @@ func (c *SDKClient) EnsureAPIServerLoadBalancer(ctx context.Context, input LoadB
 	payload.SetName(input.Name)
 	payload.SetRegion(input.Region)
 	if len(input.Tags) > 0 {
-		payload.SetLabels(input.Tags)
+		payload.SetLabels(loadBalancerLabels(input.Tags))
 	}
 	options := lb.NewLoadBalancerOptions()
 	options.SetEphemeralAddress(true)
@@ -288,8 +288,9 @@ func (c *SDKClient) ListAPIServerLoadBalancersByTags(ctx context.Context, tags m
 		return nil, err
 	}
 	matched := []*LoadBalancer{}
+	labels := loadBalancerLabels(tags)
 	for _, candidate := range resp.GetLoadBalancers() {
-		if mapContains(candidate.GetLabels(), tags) {
+		if mapContains(candidate.GetLabels(), labels) {
 			candidate := candidate
 			matched = append(matched, loadBalancerFromSDK(&candidate))
 		}
@@ -484,6 +485,14 @@ func mapContains(haystack, needle map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func loadBalancerLabels(tags map[string]string) map[string]string {
+	out := make(map[string]string, len(tags))
+	for k, v := range tags {
+		out[strings.ReplaceAll(k, "/", ".")] = v
+	}
+	return out
 }
 
 func firstNonEmpty(values ...string) string {

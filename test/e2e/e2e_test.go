@@ -34,6 +34,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud"
+	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/util"
 	"voigt.tngl.sh/cluster-api-provider-stackit/test/utils"
 )
 
@@ -288,12 +289,20 @@ var _ = Describe("Manager", Ordered, func() {
 			cloudClient := stackitCloudClientFromCredentialsSecret(ctx, cfg)
 			clusterName := fmt.Sprintf("stackit-e2e-%d", time.Now().Unix())
 			machineName := clusterName + "-machine-0"
+			testID := envDefault("STACKIT_E2E_TEST_ID", clusterName)
+			leakTags := stackitE2ETags(testID)
+
+			By("cleaning up stale STACKIT resources for the e2e test ID")
+			Expect(cloud.CleanupByTags(ctx, cloudClient, leakTags)).To(Succeed())
 
 			By("applying a workload Cluster and StackitMachine fixture")
-			fixture := renderStackitVMFixture(clusterName, machineName, cfg)
+			fixture := renderStackitVMFixture(clusterName, machineName, testID, cfg)
 			fixturePath := writeTempManifest("stackit-vm-e2e-*.yaml", fixture)
 			defer func() {
 				cleanupStackitVMFixture(clusterName, machineName, cfg.Namespace)
+				if err := cloud.CleanupByTags(ctx, cloudClient, leakTags); err != nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "STACKIT API cleanup warning: %v\n", err)
+				}
 				_ = os.Remove(fixturePath)
 			}()
 
@@ -332,6 +341,103 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(func(g Gomega) {
 				_, err := cloudClient.GetServer(ctx, instanceID)
 				g.Expect(cloud.IsNotFound(err)).To(BeTrue(), "expected server %s to be deleted, got %v", instanceID, err)
+			}, 20*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("verifying no tagged STACKIT resources remain for the e2e test ID")
+			Eventually(func(g Gomega) {
+				servers, err := cloudClient.ListServersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(servers).To(BeEmpty())
+				loadBalancers, err := cloudClient.ListAPIServerLoadBalancersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(loadBalancers).To(BeEmpty())
+			}, 5*time.Minute, 15*time.Second).Should(Succeed())
+		})
+
+		It("should create and delete a 1 control-plane / 1 worker workload Cluster without STACKIT leaks", func() {
+			if os.Getenv("STACKIT_E2E_CREATE_CLUSTER") != "true" {
+				Skip("set STACKIT_E2E_CREATE_CLUSTER=true to run the real STACKIT Cluster lifecycle e2e test")
+			}
+
+			cfg := stackitVMConfigFromEnv()
+			ctx := context.Background()
+			cloudClient := stackitCloudClientFromCredentialsSecret(ctx, cfg)
+			clusterName := fmt.Sprintf("stackit-e2e-cluster-%d", time.Now().Unix())
+			testID := envDefault("STACKIT_E2E_TEST_ID", clusterName)
+			leakTags := stackitE2ETags(testID)
+
+			By("cleaning up stale STACKIT resources for the e2e test ID")
+			Expect(cloud.CleanupByTags(ctx, cloudClient, leakTags)).To(Succeed())
+
+			By("applying a 1 control-plane / 1 worker workload Cluster fixture")
+			fixture := renderStackitClusterFixture(clusterName, testID, cfg)
+			fixturePath := writeTempManifest("stackit-cluster-e2e-*.yaml", fixture)
+			defer func() {
+				cleanupStackitClusterFixture(clusterName, cfg.Namespace)
+				if err := cloud.CleanupByTags(ctx, cloudClient, leakTags); err != nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "STACKIT API cleanup warning: %v\n", err)
+				}
+				_ = os.Remove(fixturePath)
+			}()
+
+			cmd := exec.Command("kubectl", "apply", "-f", fixturePath)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply STACKIT Cluster lifecycle fixture")
+
+			By("waiting for the StackitCluster to become ready")
+			Eventually(func(g Gomega) {
+				output := kubectlOutput(g, "get", "stackitcluster", clusterName, "-n", cfg.Namespace, "-o", "jsonpath={.status.ready}")
+				g.Expect(output).To(Equal("true"))
+			}, 15*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("waiting for one control-plane and one worker StackitMachine to provision")
+			var instanceIDs []string
+			Eventually(func(g Gomega) {
+				machines := stackitMachinesForTestID(g, cfg.Namespace, testID)
+				g.Expect(machines).To(HaveLen(2))
+				instanceIDs = instanceIDs[:0]
+				for _, machine := range machines {
+					g.Expect(machine.Status.Ready).To(BeTrue(), "StackitMachine %s is not ready", machine.Metadata.Name)
+					g.Expect(machine.Status.InstanceID).NotTo(BeEmpty(), "StackitMachine %s has no instanceID", machine.Metadata.Name)
+					instanceIDs = append(instanceIDs, machine.Status.InstanceID)
+				}
+			}, 45*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("verifying both VMs exist in STACKIT")
+			for _, instanceID := range instanceIDs {
+				instanceID := instanceID
+				Eventually(func(g Gomega) {
+					server, err := cloudClient.GetServer(ctx, instanceID)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(server.ID).To(Equal(instanceID))
+				}, 5*time.Minute, 15*time.Second).Should(Succeed())
+			}
+
+			By("deleting the workload Cluster")
+			cmd = exec.Command("kubectl", "delete", "cluster", clusterName, "-n", cfg.Namespace, "--wait=true", "--timeout=45m")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to delete workload Cluster")
+
+			By("verifying Kubernetes resources for the workload Cluster are gone")
+			Eventually(func(g Gomega) {
+				output := kubectlOutput(g, "get", "cluster", clusterName, "-n", cfg.Namespace, "-o", "name", "--ignore-not-found")
+				g.Expect(output).To(BeEmpty())
+				output = kubectlOutput(g, "get", "stackitcluster", clusterName, "-n", cfg.Namespace, "-o", "name", "--ignore-not-found")
+				g.Expect(output).To(BeEmpty())
+				output = kubectlOutput(g, "get", "machine,stackitmachine", "-n", cfg.Namespace,
+					"-l", fmt.Sprintf("cluster.x-k8s.io/cluster-name=%s", clusterName), "-o", "name", "--ignore-not-found")
+				g.Expect(output).To(BeEmpty())
+				g.Expect(stackitMachinesForTestID(g, cfg.Namespace, testID)).To(BeEmpty())
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("verifying no tagged STACKIT resources remain for the e2e test ID")
+			Eventually(func(g Gomega) {
+				servers, err := cloudClient.ListServersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(servers).To(BeEmpty())
+				loadBalancers, err := cloudClient.ListAPIServerLoadBalancersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(loadBalancers).To(BeEmpty())
 			}, 20*time.Minute, 15*time.Second).Should(Succeed())
 		})
 	})
@@ -404,7 +510,7 @@ func stackitCredentialsSecret(_ context.Context, name, namespace string) map[str
 	return out
 }
 
-func renderStackitVMFixture(clusterName, machineName string, cfg stackitVMConfig) string {
+func renderStackitVMFixture(clusterName, machineName, testID string, cfg stackitVMConfig) string {
 	securityGroups := ""
 	for _, securityGroupID := range cfg.SecurityGroupIDs {
 		securityGroups += fmt.Sprintf("\n        - %s", securityGroupID)
@@ -441,9 +547,15 @@ kind: StackitCluster
 metadata:
   name: %[1]s
   namespace: %[3]s
+  labels:
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[16]s"
 spec:
   projectID: %[4]s
   region: %[5]s
+  additionalLabels:
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[16]s"
   credentialsSecretRef:
     name: %[6]s
     namespace: %[7]s
@@ -485,7 +597,13 @@ kind: StackitMachine
 metadata:
   name: %[2]s
   namespace: %[3]s
+  labels:
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[16]s"
 spec:
+  additionalLabels:
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[16]s"
   imageID: %[9]s
   machineType: %[10]s
   availabilityZone: %[11]s%[12]s
@@ -497,7 +615,224 @@ spec:
     id: %[8]s%[15]s
 `, clusterName, machineName, cfg.Namespace, cfg.ProjectID, cfg.Region, cfg.CredentialsSecretName, cfg.CredentialsSecretNS,
 		cfg.NetworkID, cfg.ImageID, cfg.MachineType, cfg.AvailabilityZone, sshKeyName, cfg.RootVolumeSizeGiB,
-		cfg.RootVolumePerformance, securityGroups)
+		cfg.RootVolumePerformance, securityGroups, testID)
+}
+
+func renderStackitClusterFixture(clusterName, testID string, cfg stackitVMConfig) string {
+	securityGroups := ""
+	for _, securityGroupID := range cfg.SecurityGroupIDs {
+		securityGroups += fmt.Sprintf("\n        - %s", securityGroupID)
+	}
+	if securityGroups != "" {
+		securityGroups = "\n      securityGroups:" + securityGroups
+	}
+
+	sshKeyName := ""
+	if cfg.SSHKeyName != "" {
+		sshKeyName = fmt.Sprintf("\n      sshKeyName: %s", cfg.SSHKeyName)
+	}
+	controlPlaneMachineName := clusterName + "-control-plane-0"
+	workerMachineName := clusterName + "-worker-0"
+
+	return fmt.Sprintf(`apiVersion: cluster.x-k8s.io/v1beta2
+kind: Cluster
+metadata:
+  name: %[1]s
+  namespace: %[5]s
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        - 192.168.0.0/16
+    services:
+      cidrBlocks:
+        - 10.128.0.0/12
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: StackitCluster
+    name: %[1]s
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitCluster
+metadata:
+  name: %[1]s
+  namespace: %[5]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[4]s"
+spec:
+  projectID: %[6]s
+  region: %[7]s
+  additionalLabels:
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[4]s"
+  credentialsSecretRef:
+    name: %[8]s
+    namespace: %[9]s
+  network:
+    id: %[10]s
+  apiServerLoadBalancer:
+    enabled: true
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: %[2]s-bootstrap
+  namespace: %[5]s
+type: Opaque
+data:
+  value: IyEvYmluL3NoCmVjaG8gc3RhY2tpdC1lMmUtY29udHJvbC1wbGFuZQo=
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: %[3]s-bootstrap
+  namespace: %[5]s
+type: Opaque
+data:
+  value: IyEvYmluL3NoCmVjaG8gc3RhY2tpdC1lMmUtd29ya2VyCg==
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Machine
+metadata:
+  name: %[2]s
+  namespace: %[5]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+    cluster.x-k8s.io/control-plane: ""
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[4]s"
+spec:
+  clusterName: %[1]s
+  bootstrap:
+    dataSecretName: %[2]s-bootstrap
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: StackitMachine
+    name: %[2]s
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitMachine
+metadata:
+  name: %[2]s
+  namespace: %[5]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[4]s"
+spec:
+  additionalLabels:
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[4]s"
+  imageID: %[11]s
+  machineType: %[12]s
+  availabilityZone: %[13]s%[14]s
+  rootVolume:
+    sizeGiB: %[15]s
+    performanceClass: %[16]s
+    deleteOnTermination: true
+  network:
+    id: %[10]s%[17]s
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Machine
+metadata:
+  name: %[3]s
+  namespace: %[5]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[4]s"
+spec:
+  clusterName: %[1]s
+  bootstrap:
+    dataSecretName: %[3]s-bootstrap
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: StackitMachine
+    name: %[3]s
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitMachine
+metadata:
+  name: %[3]s
+  namespace: %[5]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[4]s"
+spec:
+  additionalLabels:
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[4]s"
+  imageID: %[11]s
+  machineType: %[12]s
+  availabilityZone: %[13]s%[14]s
+  rootVolume:
+    sizeGiB: %[15]s
+    performanceClass: %[16]s
+    deleteOnTermination: true
+  network:
+    id: %[10]s%[17]s
+`, clusterName, controlPlaneMachineName, workerMachineName, testID, cfg.Namespace, cfg.ProjectID, cfg.Region,
+		cfg.CredentialsSecretName, cfg.CredentialsSecretNS, cfg.NetworkID, cfg.ImageID, cfg.MachineType,
+		cfg.AvailabilityZone, sshKeyName, cfg.RootVolumeSizeGiB, cfg.RootVolumePerformance, securityGroups)
+}
+
+func stackitE2ETags(testID string) map[string]string {
+	return map[string]string{
+		util.LabelE2E:    util.E2EValue,
+		util.LabelTestID: testID,
+	}
+}
+
+func cleanupStackitClusterFixture(clusterName, namespace string) {
+	for _, args := range [][]string{
+		{"delete", "cluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=45m"},
+		{"delete", "machine", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name=" + clusterName, "--ignore-not-found", "--wait=true", "--timeout=20m"},
+		{"delete", "stackitmachine", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name=" + clusterName, "--ignore-not-found", "--wait=true", "--timeout=20m"},
+		{"delete", "stackitcluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=10m"},
+		{"delete", "secret", clusterName + "-control-plane-0-bootstrap", "-n", namespace, "--ignore-not-found"},
+		{"delete", "secret", clusterName + "-worker-0-bootstrap", "-n", namespace, "--ignore-not-found"},
+	} {
+		cmd := exec.Command("kubectl", args...)
+		if _, err := utils.Run(cmd); err != nil {
+			_, _ = fmt.Fprintf(GinkgoWriter, "cleanup warning: %v\n", err)
+		}
+	}
+}
+
+type stackitMachineList struct {
+	Items []stackitMachineItem `json:"items"`
+}
+
+type stackitMachineItem struct {
+	Metadata struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Spec struct {
+		AdditionalLabels map[string]string `json:"additionalLabels"`
+	} `json:"spec"`
+	Status struct {
+		Ready      bool   `json:"ready"`
+		InstanceID string `json:"instanceID"`
+	} `json:"status"`
+}
+
+func stackitMachinesForTestID(g Gomega, namespace, testID string) []stackitMachineItem {
+	cmd := exec.Command("kubectl", "get", "stackitmachines", "-n", namespace, "-o", "json")
+	output, err := utils.Run(cmd)
+	g.Expect(err).NotTo(HaveOccurred())
+	var list stackitMachineList
+	g.Expect(json.Unmarshal([]byte(output), &list)).To(Succeed())
+	out := []stackitMachineItem{}
+	for _, machine := range list.Items {
+		if machine.Spec.AdditionalLabels[util.LabelTestID] == testID {
+			out = append(out, machine)
+		}
+	}
+	return out
 }
 
 func cleanupStackitVMFixture(clusterName, machineName, namespace string) {

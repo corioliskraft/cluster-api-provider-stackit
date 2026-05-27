@@ -82,9 +82,11 @@
   - [x] Prepare the workload cluster template for an external cloud provider.
   - [ ] Verify the addon can be applied by e2e tests and nodes become Ready.
 - [ ] PR 4: Add reproducible create/delete e2e coverage with leak cleanup.
-  - [ ] Create a 1 control-plane / 1 worker cluster.
-  - [ ] Delete the cluster and assert no Machines, StackitMachines, VMs, load balancers, or finalizer leaks remain.
-  - [ ] Add `make cleanup-stackit` backed by direct STACKIT API cleanup using required test tags.
+  - [x] Create a 1 control-plane / 1 worker cluster.
+  - [x] Delete the cluster and assert no Machines, StackitMachines, VMs, load balancers, or finalizer leaks remain.
+  - [x] Add provider-managed and e2e/test-id labels to STACKIT resources so leaks can be selected reproducibly.
+  - [x] Extend the real VM e2e scenario to pre-clean, tag resources, and assert no tagged VMs or load balancers remain.
+  - [x] Add `make cleanup-stackit` backed by direct STACKIT API cleanup using required test tags.
 - [ ] PR 5: Add clusterctl release packaging.
   - [ ] Generate `infrastructure-components.yaml`, `metadata.yaml`, `cluster-template.yaml`, and `cluster-template-development.yaml`.
   - [ ] Verify `clusterctl init --infrastructure stackit` and `clusterctl generate cluster`.

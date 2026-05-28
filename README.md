@@ -4,6 +4,13 @@ Cluster API infrastructure provider for STACKIT.
 
 This repository contains the Kubernetes API types, controllers, cloud abstraction, and STACKIT SDK backend needed to create STACKIT infrastructure for Cluster API workload clusters. The current implementation manages existing STACKIT networks, STACKIT servers, and an optional provider-managed API server load balancer for control-plane machines.
 
+Documentation is available as an mdBook under `docs/`:
+
+```sh
+make -C docs build
+make -C docs serve
+```
+
 ## Status
 
 This provider is in early development. The controller and SDK paths have unit/envtest coverage, and the SDK load balancer behavior has been validated against a real STACKIT project. Full workload-cluster e2e coverage is still pending.

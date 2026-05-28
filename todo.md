@@ -110,4 +110,8 @@
 - [ ] PR 10: Enable ClusterTopology validation for local clusterctl installs.
   - [x] Enable the CAPI `ClusterTopology` feature gate in the local clusterctl configuration.
   - [x] Re-run the ClusterClass apply flow against a management cluster with `ClusterTopology=true`.
+- [ ] PR 11: Add mdBook documentation.
+  - [x] Create the mdBook structure under `docs/`.
+  - [x] Add user, architecture, testing, development, and reference sections based on the current roadmap and instructions.
+  - [x] Add a `docs/Makefile` for building, serving, and cleaning the documentation.
 - [ ] Decide on release/distribution flow: installer YAML, Helm chart, or both.

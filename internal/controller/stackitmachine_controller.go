@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -180,6 +181,24 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 		return ctrl.Result{}, err
 	}
 
+	sm.Status.InstanceID = server.ID
+	sm.Status.InstanceState = server.State
+	sm.Status.Addresses = toMachineAddresses(server.Addresses)
+
+	providerID := cloud.NewProviderID(s.StackitCluster.Spec.ProjectID, s.StackitCluster.Spec.Region, server.ID)
+	sm.Spec.ProviderID = &providerID
+	sm.Status.ProviderID = providerID
+	sm.Status.Initialization.Provisioned = true
+
+	if server.State != "" && server.State != "ACTIVE" {
+		sm.Status.Ready = false
+		util.SetCondition(&sm.Status.Conditions, infrav1.MachineInstanceReadyCondition,
+			metav1.ConditionFalse, "Provisioning", fmt.Sprintf("server state is %s", server.State), sm.Generation)
+		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
+			metav1.ConditionFalse, "Provisioning", fmt.Sprintf("server state is %s", server.State), sm.Generation)
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+
 	if err := r.reconcileAPIServerLoadBalancerTarget(ctx, cloudClient, s, server); err != nil {
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
 			metav1.ConditionFalse, "LoadBalancerTargetError", err.Error(), sm.Generation)
@@ -189,15 +208,7 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 		return ctrl.Result{}, err
 	}
 
-	sm.Status.InstanceID = server.ID
-	sm.Status.InstanceState = server.State
-	sm.Status.Addresses = toMachineAddresses(server.Addresses)
-
-	providerID := cloud.NewProviderID(s.StackitCluster.Spec.ProjectID, s.StackitCluster.Spec.Region, server.ID)
-	sm.Spec.ProviderID = &providerID
-	sm.Status.ProviderID = providerID
 	sm.Status.Ready = true
-	sm.Status.Initialization.Provisioned = true
 
 	util.SetCondition(&sm.Status.Conditions, infrav1.MachineInstanceReadyCondition,
 		metav1.ConditionTrue, "Available", "", sm.Generation)

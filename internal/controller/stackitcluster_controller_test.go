@@ -72,25 +72,30 @@ var _ = Describe("StackitCluster Controller", func() {
 		deleteIfExists(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: credentials, Namespace: namespace}})
 	})
 
-	It("sets Ready after network validation and waits for the first load balancer target", func() {
+	It("creates the API server load balancer and publishes the control plane endpoint", func() {
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Spec.ControlPlaneEndpoint = clusterv1.APIEndpoint{}
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result.Requeue).To(BeFalse())
 
-		got := &infrav1.StackitCluster{}
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		Expect(got.Status.Ready).To(BeTrue())
-		Expect(got.Status.APIServerEndpoint.Host).To(Equal("198.51.100.1"))
-		Expect(got.Status.APIServerLoadBalancerID).To(BeEmpty())
+		Expect(got.Spec.ControlPlaneEndpoint).To(Equal(clusterv1.APIEndpoint{Host: "203.0.113.10", Port: 6443}))
+		Expect(got.Status.APIServerEndpoint).To(Equal(got.Spec.ControlPlaneEndpoint))
+		Expect(got.Status.APIServerLoadBalancerID).NotTo(BeEmpty())
 		Expect(got.Status.FailureDomains).To(ConsistOf(
 			clusterv1.FailureDomain{Name: "eu01-1", ControlPlane: ptr.To(true), Attributes: map[string]string{"region": "eu01"}},
 			clusterv1.FailureDomain{Name: "eu01-2", ControlPlane: ptr.To(true), Attributes: map[string]string{"region": "eu01"}},
 			clusterv1.FailureDomain{Name: "eu01-3", ControlPlane: ptr.To(true), Attributes: map[string]string{"region": "eu01"}},
 		))
-		Expect(fakeCloud.LoadBalancerCount()).To(Equal(0))
+		Expect(fakeCloud.LoadBalancerCount()).To(Equal(1))
 		expectCondition(got.Status.Conditions, infrav1.ClusterReadyCondition, metav1.ConditionTrue, "Available")
 		expectCondition(got.Status.Conditions, infrav1.ClusterNetworkReadyCondition, metav1.ConditionTrue, "Available")
-		expectCondition(got.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition, metav1.ConditionFalse, "Provisioning")
+		expectCondition(got.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition, metav1.ConditionTrue, "Available")
 	})
 
 	It("uses an externally provided control plane endpoint when load balancer creation is disabled", func() {
@@ -203,12 +208,12 @@ var _ = Describe("StackitCluster Controller", func() {
 	It("deletes the provider-managed load balancer and removes the finalizer", func() {
 		_, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		loadBalancerID := createAPIServerLoadBalancer(ctx, fakeCloud)
-		updateStackitClusterLoadBalancer(ctx, clusterName, namespace, loadBalancerID)
-		Expect(fakeCloud.LoadBalancerCount()).To(Equal(1))
 
 		got := &infrav1.StackitCluster{}
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.APIServerLoadBalancerID).NotTo(BeEmpty())
+		Expect(fakeCloud.LoadBalancerCount()).To(Equal(1))
+
 		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
 
 		_, err = reconciler.Reconcile(ctx, request)
@@ -224,11 +229,10 @@ var _ = Describe("StackitCluster Controller", func() {
 	It("keeps the finalizer when load balancer deletion returns a transient error", func() {
 		_, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		loadBalancerID := createAPIServerLoadBalancer(ctx, fakeCloud)
-		updateStackitClusterLoadBalancer(ctx, clusterName, namespace, loadBalancerID)
 
 		got := &infrav1.StackitCluster{}
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.APIServerLoadBalancerID).NotTo(BeEmpty())
 		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
 		fakeCloud.FailNextDeleteLB = fmt.Errorf("delete load balancer: %w", cloud.ErrTransient)
 

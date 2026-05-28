@@ -17,10 +17,10 @@ metadata:
 data:
   cloud.yaml: |
     global:
-      project-id: ${STACKIT_PROJECT_ID}
+      projectId: ${STACKIT_PROJECT_ID}
       region: ${STACKIT_REGION}
-    load-balancer:
-      network-id: ${STACKIT_NETWORK_ID}
+    loadBalancer:
+      networkId: ${STACKIT_NETWORK_ID}
 ---
 apiVersion: v1
 kind: Secret
@@ -28,8 +28,8 @@ metadata:
   name: stackit-cloud-secret
   namespace: kube-system
 type: Opaque
-stringData:
-  sa_key.json: ${STACKIT_SERVICE_ACCOUNT_JSON}
+data:
+  sa_key.json: ${STACKIT_SERVICE_ACCOUNT_JSON_B64}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -122,7 +122,7 @@ metadata:
   labels:
     app: stackit-cloud-controller-manager
 spec:
-  replicas: 2
+  replicas: 1
   strategy:
     type: RollingUpdate
   selector:
@@ -134,15 +134,30 @@ spec:
         app: stackit-cloud-controller-manager
     spec:
       serviceAccountName: stackit-cloud-controller-manager
+      dnsPolicy: Default
       terminationGracePeriodSeconds: 30
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - key: node.cloudprovider.kubernetes.io/uninitialized
+          operator: Exists
+          effect: NoSchedule
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
       containers:
         - name: stackit-cloud-controller-manager
-          image: ${STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE:=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:release-v1.34}
+          image: ${STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE:=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.31.11}
           args:
             - --cloud-provider=stackit
             - --webhook-secure-port=0
             - --concurrent-service-syncs=3
-            - --controllers=service-lb-controller
+            - --controllers=cloud-node-controller,cloud-node-lifecycle-controller,service-lb-controller
             - --authorization-always-allow-paths=/metrics
             - --leader-elect=true
             - --leader-elect-resource-name=stackit-cloud-controller-manager

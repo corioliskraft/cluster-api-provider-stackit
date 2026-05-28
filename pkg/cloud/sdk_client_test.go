@@ -93,6 +93,7 @@ func TestSDKClientCreateServerUsesExpectedPayload(t *testing.T) {
 	assertStringField(t, createPayload, "availabilityZone", "eu01-1")
 	assertStringField(t, createPayload, "keypairName", "default")
 	assertStringField(t, createPayload, "userData", "I2Nsb3VkLWNvbmZpZwo=")
+	assertBoolField(t, createPayload, "configDrive", true)
 	assertNestedStringField(t, createPayload, []string{"labels", "cluster"}, "test")
 	assertNestedStringField(t, createPayload, []string{"networking", "networkId"}, testSDKNetworkID)
 	assertNestedStringField(t, createPayload, []string{"bootVolume", "performanceClass"}, "storage_premium_perf6")
@@ -161,6 +162,46 @@ func TestSDKClientEnsureAPIServerLoadBalancerCreatesExpectedPayload(t *testing.T
 	assertNestedStringField(t, createPayload, []string{"targetPools", "0", "targets", "0", "ip"}, "10.0.0.10")
 	assertNestedStringField(t, createPayload, []string{"listeners", "0", "targetPool"}, apiserverTargetPoolName)
 	assertNestedNumberField(t, createPayload, []string{"listeners", "0", "port"}, 6443)
+}
+
+func TestSDKClientEnsureAPIServerLoadBalancerUsesBootstrapTargetWhenInitialTargetsAreEmpty(t *testing.T) {
+	var createPayload map[string]interface{}
+	server := newSDKTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/load-balancers"):
+			writeJSON(t, w, map[string]interface{}{"loadBalancers": []interface{}{}})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/load-balancers"):
+			createPayload = readJSON(t, r)
+			writeJSON(t, w, sdkLoadBalancerJSON("apiserver-test", "203.0.113.10", []interface{}{
+				map[string]interface{}{"name": apiserverTargetPoolName, "targetPort": 6443, "targets": []interface{}{
+					map[string]interface{}{"displayName": bootstrapTargetName, "ip": bootstrapTargetIP},
+				}},
+			}))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+
+	client := newTestSDKClient(t, server.URL)
+	loadBalancer, err := client.EnsureAPIServerLoadBalancer(context.Background(), LoadBalancerInput{
+		Name:      "apiserver-test",
+		Region:    testSDKRegion,
+		NetworkID: testSDKNetworkID,
+		Port:      6443,
+		Tags: map[string]string{
+			"cluster.x-k8s.io/cluster-name": "test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("EnsureAPIServerLoadBalancer() error = %v", err)
+	}
+	if loadBalancer.ID != "apiserver-test" || loadBalancer.IP != "203.0.113.10" || loadBalancer.Port != 6443 {
+		t.Fatalf("EnsureAPIServerLoadBalancer() = %#v", loadBalancer)
+	}
+
+	assertNestedStringField(t, createPayload, []string{"targetPools", "0", "targets", "0", "displayName"}, bootstrapTargetName)
+	assertNestedStringField(t, createPayload, []string{"targetPools", "0", "targets", "0", "ip"}, bootstrapTargetIP)
+	assertNestedStringField(t, createPayload, []string{"listeners", "0", "targetPool"}, apiserverTargetPoolName)
 }
 
 func TestSDKClientLoadBalancerTargetUpdates(t *testing.T) {
@@ -317,6 +358,13 @@ func assertStringField(t *testing.T, m map[string]interface{}, key, want string)
 	t.Helper()
 	if got := lookup(m, key); got != want {
 		t.Fatalf("%s = %#v, want %q in %#v", key, got, want, m)
+	}
+}
+
+func assertBoolField(t *testing.T, m map[string]interface{}, key string, want bool) {
+	t.Helper()
+	if got := lookup(m, key); got != want {
+		t.Fatalf("%s = %#v, want %t in %#v", key, got, want, m)
 	}
 }
 

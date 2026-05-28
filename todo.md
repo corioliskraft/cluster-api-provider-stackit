@@ -72,15 +72,14 @@
   - [x] Ensure paused Clusters or paused objects do not trigger cloud API calls.
   - [x] Ensure conditions include observedGeneration and specific reasons.
   - [x] Regenerate CRDs/deepcopy and run unit/envtest coverage.
-- [ ] PR 2: Re-verify providerID compatibility with `cloud-provider-stackit`.
+- [x] PR 2: Re-verify providerID compatibility with `cloud-provider-stackit`.
   - [x] Confirm providerID format, generation, parsing, and node matching against upstream cloud provider behavior.
   - [x] Keep `NewProviderID`, `ParseProviderID`, round-trip, and cloud-provider-format tests green.
-  - [ ] Validate StackitMachine, Machine, and Node providerID alignment in a real workload cluster.
-    Static compatibility is verified; real NodeRef validation depends on PR 3 installing `cloud-provider-stackit` in the workload cluster.
-- [ ] PR 3: Integrate `cloud-provider-stackit` as an optional workload-cluster addon.
+  - [x] Validate StackitMachine, Machine, and Node providerID alignment in a real workload cluster.
+- [x] PR 3: Integrate `cloud-provider-stackit` as an optional workload-cluster addon.
   - [x] Add addon manifests for the STACKIT cloud controller manager and required RBAC/config references.
   - [x] Prepare the workload cluster template for an external cloud provider.
-  - [ ] Verify the addon can be applied by e2e tests and nodes become Ready.
+  - [x] Verify the addon can be applied by e2e tests and nodes become Ready.
 - [ ] PR 4: Add reproducible create/delete e2e coverage with leak cleanup.
   - [x] Create a 1 control-plane / 1 worker cluster.
   - [x] Delete the cluster and assert no Machines, StackitMachines, VMs, load balancers, or finalizer leaks remain.

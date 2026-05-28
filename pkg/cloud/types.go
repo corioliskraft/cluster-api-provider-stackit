@@ -30,8 +30,9 @@ type Address struct {
 
 // Network is an existing STACKIT virtual network referenced by the provider.
 type Network struct {
-	ID   string
-	Name string
+	ID           string
+	Name         string
+	IPv4Prefixes []string
 }
 
 // LoadBalancer describes an API-server load balancer.

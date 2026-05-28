@@ -20,6 +20,11 @@ import (
 	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud"
 )
 
+const (
+	bootstrapTargetName = "capi-bootstrap-placeholder"
+	bootstrapTargetIP   = "10.0.0.1"
+)
+
 // Client is an in-memory implementation of cloud.Client.
 type Client struct {
 	mu sync.Mutex
@@ -211,8 +216,12 @@ func (c *Client) EnsureAPIServerLoadBalancer(_ context.Context, input cloud.Load
 		Port: input.Port,
 	}
 	targets := map[string]string{}
-	for _, target := range input.Targets {
-		targets[target.Name] = target.IP
+	if len(input.Targets) == 0 {
+		targets[bootstrapTargetName] = bootstrapTargetIP
+	} else {
+		for _, target := range input.Targets {
+			targets[target.Name] = target.IP
+		}
 	}
 	c.loadBalancers[id] = &lbEntry{lb: lb, tags: copyTags(input.Tags), targets: targets}
 	out := *lb
@@ -246,6 +255,9 @@ func (c *Client) EnsureAPIServerLoadBalancerTarget(_ context.Context, input clou
 	entry, ok := c.loadBalancers[input.LoadBalancerID]
 	if !ok {
 		return fmt.Errorf("load balancer %q: %w", input.LoadBalancerID, cloud.ErrNotFound)
+	}
+	if entry.targets[bootstrapTargetName] == bootstrapTargetIP {
+		delete(entry.targets, bootstrapTargetName)
 	}
 	entry.targets[input.Name] = input.IP
 	return nil

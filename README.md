@@ -86,7 +86,7 @@ export STACKIT_PROJECT_ID=4cf9e1f0-1f18-4c5b-bcc5-fbd3dd6675a5
 export STACKIT_REGION=eu01
 export STACKIT_NETWORK_ID=3a87ac2f-8297-4dea-a9da-11d3c19e45fe
 export STACKIT_IMAGE_ID=3ad2867e-695b-4ee6-9502-b563013413d4 # non-ARM Ubuntu 22.04 in eu01
-export STACKIT_MACHINE_TYPE=c2i.1
+export STACKIT_MACHINE_TYPE=c2i.2
 export STACKIT_SSH_KEY_NAME=<ssh-key-name>
 export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
 
@@ -152,6 +152,19 @@ go test -tags=stackit_integration ./pkg/cloud -run 'TestSDKClient.*Integration' 
 
 The integration tests require a valid credentials Secret or local service account key, an existing network, and a target IP in that network for load balancer target-pool validation.
 
+Integration and e2e tests are opt-in because they create or inspect real STACKIT resources:
+
+| Test | Command | Required opt-in env vars | Common env vars | Test-specific env vars |
+| --- | --- | --- | --- | --- |
+| STACKIT SDK integration | `go test -tags=stackit_integration ./pkg/cloud -run 'TestSDKClient.*Integration' -v` | none | `STACKIT_PROJECT_ID`, `STACKIT_REGION`, `STACKIT_SERVICE_ACCOUNT_JSON_FILE` | `STACKIT_NETWORK_ID`, `STACKIT_TEST_TARGET_IP` |
+| Real VM lifecycle e2e | `go test -tags=e2e ./test/e2e -v -ginkgo.v --ginkgo.focus='real STACKIT VM'` | `STACKIT_E2E_CREATE_VMS=true` | `KIND_CLUSTER`, `STACKIT_PROJECT_ID`, `STACKIT_REGION`, `STACKIT_NETWORK_ID`, `STACKIT_IMAGE_ID`, `STACKIT_AVAILABILITY_ZONE`, `STACKIT_CREDENTIALS_SECRET_NAME`, `STACKIT_CREDENTIALS_SECRET_NAMESPACE` | `STACKIT_E2E_TEST_ID`, `STACKIT_E2E_NAMESPACE`, `STACKIT_SSH_KEY_NAME`, `STACKIT_SECURITY_GROUP_IDS`, `STACKIT_ROOT_VOLUME_SIZE_GIB`, `STACKIT_ROOT_VOLUME_PERFORMANCE_CLASS` |
+| 1 control-plane / 1 worker create-delete e2e | `go test -tags=e2e ./test/e2e -v -ginkgo.v --ginkgo.focus='1 control-plane / 1 worker'` | `STACKIT_E2E_CREATE_CLUSTER=true` | same as real VM lifecycle e2e | same as real VM lifecycle e2e |
+| Workload NodeRef/providerID e2e | `go test -tags=e2e ./test/e2e -v -ginkgo.v --ginkgo.focus='align StackitMachine'` | `STACKIT_E2E_NODE_REF=true` | same as real VM lifecycle e2e | `KUBERNETES_VERSION`, `STACKIT_E2E_CNI` (`cilium` by default, or `calico`), `STACKIT_E2E_CNI_MANIFEST`, `STACKIT_E2E_CALICO_MANIFEST`, `STACKIT_E2E_CILIUM_VERSION`, `STACKIT_E2E_CILIUM_CLUSTER_POOL_IPV4_CIDR`, `STACKIT_E2E_CILIUM_CLUSTER_POOL_IPV4_MASK_SIZE`, `STACKIT_E2E_CILIUM_INSTALL_ARGS`, plus the real VM lifecycle e2e optional vars |
+| Worker scale e2e | `go test -tags=e2e ./test/e2e -v -ginkgo.v --ginkgo.focus='scale a worker MachineDeployment'` | `STACKIT_E2E_SCALE_WORKERS=true` | same as real VM lifecycle e2e | `KUBERNETES_VERSION`, plus the real VM lifecycle e2e optional vars |
+| Worker upgrade e2e | `go test -tags=e2e ./test/e2e -v -ginkgo.v --ginkgo.focus='replace worker VMs'` | `STACKIT_E2E_UPGRADE_WORKERS=true` | same as real VM lifecycle e2e | `STACKIT_E2E_UPGRADE_FROM`, `STACKIT_E2E_UPGRADE_TO`, plus the real VM lifecycle e2e optional vars |
+
+The e2e tests always create STACKIT machines with machine type `c2i.2`. The NodeRef/providerID e2e installs Cilium by default using the `cilium` CLI with cluster-pool IPAM set to the workload cluster pod CIDR (`192.168.0.0/16`, mask size `24`), then waits for the Cilium Operator and DaemonSets to roll out. Set `STACKIT_E2E_CNI=calico` to use Calico instead, or set `STACKIT_E2E_CNI_MANIFEST=<url-or-path>` to apply a custom CNI manifest directly with `kubectl`.
+
 Run the opt-in e2e test that creates and deletes a real STACKIT VM through CAPI `Cluster`/`Machine` and `StackitCluster`/`StackitMachine` objects:
 
 ```sh
@@ -161,7 +174,6 @@ export STACKIT_PROJECT_ID=4cf9e1f0-1f18-4c5b-bcc5-fbd3dd6675a5
 export STACKIT_REGION=eu01
 export STACKIT_NETWORK_ID=3a87ac2f-8297-4dea-a9da-11d3c19e45fe
 export STACKIT_IMAGE_ID=<image-uuid>
-export STACKIT_MACHINE_TYPE=c2i.2
 export STACKIT_AVAILABILITY_ZONE=eu01-1
 export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
 export STACKIT_CREDENTIALS_SECRET_NAMESPACE=default

@@ -50,6 +50,8 @@ const metricsServiceName = "cluster-api-provider-stackit-controller-manager-metr
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "cluster-api-provider-stackit-metrics-binding"
 
+const stackitE2EMachineType = "c2i.2"
+
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
 
@@ -81,6 +83,14 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
+
+		By("restarting the controller-manager to pick up the freshly loaded image")
+		cmd = exec.Command("kubectl", "rollout", "restart", "deployment/cluster-api-provider-stackit-controller-manager", "-n", namespace)
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to restart the controller-manager")
+		cmd = exec.Command("kubectl", "rollout", "status", "deployment/cluster-api-provider-stackit-controller-manager", "-n", namespace, "--timeout=5m")
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "controller-manager did not roll out")
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
@@ -441,6 +451,97 @@ var _ = Describe("Manager", Ordered, func() {
 			}, 20*time.Minute, 15*time.Second).Should(Succeed())
 		})
 
+		It("should align StackitMachine, Machine, and Node providerIDs in a real workload Cluster", func() {
+			if os.Getenv("STACKIT_E2E_NODE_REF") != "true" {
+				Skip("set STACKIT_E2E_NODE_REF=true to run the real workload Cluster NodeRef e2e test")
+			}
+
+			cfg := stackitVMConfigFromEnv()
+			ctx := context.Background()
+			cloudClient := stackitCloudClientFromCredentialsSecret(ctx, cfg)
+			clusterName := fmt.Sprintf("stackit-e2e-noderef-%d", time.Now().Unix())
+			testID := envDefault("STACKIT_E2E_TEST_ID", clusterName)
+			leakTags := stackitE2ETags(testID)
+			kubernetesVersion := envDefault("KUBERNETES_VERSION", "v1.31.0")
+			observedInstanceIDs := []string{}
+
+			By("cleaning up stale STACKIT resources for the e2e test ID")
+			Expect(cloud.CleanupByTags(ctx, cloudClient, leakTags)).To(Succeed())
+
+			By("applying a real kubeadm workload Cluster fixture")
+			fixture := renderStackitKubeadmClusterFixture(clusterName, testID, cfg, kubernetesVersion)
+			fixturePath := writeTempManifest("stackit-noderef-e2e-*.yaml", fixture)
+			var workloadKubeconfig string
+			defer func() {
+				cleanupStackitKubeadmClusterFixture(clusterName, cfg.Namespace)
+				cleanupCloudServersByID(ctx, cloudClient, observedInstanceIDs)
+				if err := cloud.CleanupByTags(ctx, cloudClient, leakTags); err != nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "STACKIT API cleanup warning: %v\n", err)
+				}
+				if workloadKubeconfig != "" {
+					_ = os.Remove(workloadKubeconfig)
+				}
+				_ = os.Remove(fixturePath)
+			}()
+
+			cmd := exec.Command("kubectl", "apply", "-f", fixturePath)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply STACKIT NodeRef fixture")
+
+			By("waiting for the StackitCluster to become ready")
+			Eventually(func(g Gomega) {
+				output := kubectlOutput(g, "get", "stackitcluster", clusterName, "-n", cfg.Namespace, "-o", "jsonpath={.status.ready}")
+				g.Expect(output).To(Equal("true"))
+			}, 15*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("waiting for the control-plane VM to provision")
+			Eventually(func(g Gomega) {
+				machine := readyStackitMachineByNamePart(g, cfg.Namespace, testID, "control-plane")
+				observedInstanceIDs = appendUnique(observedInstanceIDs, machine.Status.InstanceID)
+			}, 45*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("extracting the workload Cluster kubeconfig")
+			Eventually(func(g Gomega) {
+				workloadKubeconfig = workloadKubeconfigFromSecret(g, clusterName, cfg.Namespace)
+				output := kubectlOutputWithKubeconfig(g, workloadKubeconfig, "get", "ns", "kube-system", "-o", "name")
+				g.Expect(output).To(Equal("namespace/kube-system"))
+			}, 20*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("installing CNI and cloud-provider-stackit into the workload Cluster")
+			installWorkloadAddons(workloadKubeconfig, clusterName, cfg, stackitCredentialsSecret(ctx, cfg.CredentialsSecretName, cfg.CredentialsSecretNS))
+
+			By("waiting for one control-plane and one worker VM to provision")
+			Eventually(func(g Gomega) {
+				machines := readyStackitMachines(g, cfg.Namespace, testID, 2)
+				observedInstanceIDs = appendUnique(observedInstanceIDs, instanceIDs(machines)...)
+			}, 45*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("waiting for workload Nodes to be Ready")
+			Eventually(func(g Gomega) {
+				expectWorkloadNodesReady(g, workloadKubeconfig, 2)
+			}, 25*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("verifying CAPI Machines reference Nodes with matching STACKIT providerIDs")
+			Eventually(func(g Gomega) {
+				expectProviderIDNodeRefAlignment(g, cfg.Namespace, clusterName, testID, workloadKubeconfig, 2)
+			}, 15*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("deleting the workload Cluster")
+			cmd = exec.Command("kubectl", "delete", "cluster", clusterName, "-n", cfg.Namespace, "--wait=true", "--timeout=45m")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to delete NodeRef workload Cluster")
+
+			By("verifying no tagged STACKIT resources remain for the e2e test ID")
+			Eventually(func(g Gomega) {
+				servers, err := cloudClient.ListServersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(servers).To(BeEmpty())
+				loadBalancers, err := cloudClient.ListAPIServerLoadBalancersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(loadBalancers).To(BeEmpty())
+			}, 20*time.Minute, 15*time.Second).Should(Succeed())
+		})
+
 		It("should scale a worker MachineDeployment up and down without STACKIT leaks", func() {
 			if os.Getenv("STACKIT_E2E_SCALE_WORKERS") != "true" {
 				Skip("set STACKIT_E2E_SCALE_WORKERS=true to run the real STACKIT MachineDeployment scale e2e test")
@@ -710,7 +811,7 @@ func stackitVMConfigFromEnv() stackitVMConfig {
 		Region:                envDefault("STACKIT_REGION", "eu01"),
 		NetworkID:             requiredEnv("STACKIT_NETWORK_ID"),
 		ImageID:               requiredEnv("STACKIT_IMAGE_ID"),
-		MachineType:           requiredEnv("STACKIT_MACHINE_TYPE"),
+		MachineType:           stackitE2EMachineType,
 		AvailabilityZone:      requiredEnv("STACKIT_AVAILABILITY_ZONE"),
 		SSHKeyName:            os.Getenv("STACKIT_SSH_KEY_NAME"),
 		SecurityGroupIDs:      splitCSV(os.Getenv("STACKIT_SECURITY_GROUP_IDS")),
@@ -1153,6 +1254,281 @@ spec:
 		cfg.RootVolumePerformance, securityGroups, kubernetesVersion)
 }
 
+func renderStackitKubeadmClusterFixture(clusterName, testID string, cfg stackitVMConfig, kubernetesVersion string) string {
+	securityGroups := ""
+	for _, securityGroupID := range cfg.SecurityGroupIDs {
+		securityGroups += fmt.Sprintf("\n        - %s", securityGroupID)
+	}
+	if securityGroups != "" {
+		securityGroups = "\n      securityGroups:" + securityGroups
+	}
+
+	sshKeyName := ""
+	if cfg.SSHKeyName != "" {
+		sshKeyName = fmt.Sprintf("\n      sshKeyName: %s", cfg.SSHKeyName)
+	}
+	kubernetesRepoMinor := kubernetesAptRepoMinor(kubernetesVersion)
+	controlPlanePreKubeadmCommands := indentBlock(kubeadmPackageInstallCommands(kubernetesRepoMinor), 6)
+	workerPreKubeadmCommands := indentBlock(kubeadmPackageInstallCommands(kubernetesRepoMinor), 8)
+
+	return fmt.Sprintf(`apiVersion: cluster.x-k8s.io/v1beta2
+kind: Cluster
+metadata:
+  name: %[1]s
+  namespace: %[3]s
+  labels:
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[2]s"
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        - 192.168.0.0/16
+    services:
+      cidrBlocks:
+        - 10.128.0.0/12
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: StackitCluster
+    name: %[1]s
+  controlPlaneRef:
+    apiGroup: controlplane.cluster.x-k8s.io
+    kind: KubeadmControlPlane
+    name: %[1]s-control-plane
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitCluster
+metadata:
+  name: %[1]s
+  namespace: %[3]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[2]s"
+spec:
+  projectID: %[4]s
+  region: %[5]s
+  additionalLabels:
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[2]s"
+  credentialsSecretRef:
+    name: %[6]s
+    namespace: %[7]s
+  network:
+    id: %[8]s
+  apiServerLoadBalancer:
+    enabled: true
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+kind: KubeadmControlPlane
+metadata:
+  name: %[1]s-control-plane
+  namespace: %[3]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[2]s"
+spec:
+  replicas: 1
+  version: %[16]s
+  machineTemplate:
+    metadata:
+      labels:
+        cluster-api-provider-stackit/e2e: "true"
+        cluster-api-provider-stackit/test-id: "%[2]s"
+    spec:
+      infrastructureRef:
+        apiGroup: infrastructure.cluster.x-k8s.io
+        kind: StackitMachineTemplate
+        name: %[1]s-control-plane
+  kubeadmConfigSpec:
+    preKubeadmCommands:
+%[17]s
+    initConfiguration:
+      nodeRegistration:
+        name: '{{ ds.meta_data.local_hostname }}'
+        criSocket: unix:///var/run/containerd/containerd.sock
+        ignorePreflightErrors:
+          - NumCPU
+        kubeletExtraArgs:
+          - name: cloud-provider
+            value: external
+    joinConfiguration:
+      timeouts:
+        tlsBootstrapSeconds: 300
+      nodeRegistration:
+        name: '{{ ds.meta_data.local_hostname }}'
+        criSocket: unix:///var/run/containerd/containerd.sock
+        ignorePreflightErrors:
+          - NumCPU
+        kubeletExtraArgs:
+          - name: cloud-provider
+            value: external
+    clusterConfiguration:
+      controllerManager:
+        extraArgs:
+          - name: cloud-provider
+            value: external
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitMachineTemplate
+metadata:
+  name: %[1]s-control-plane
+  namespace: %[3]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[2]s"
+spec:
+  template:
+    spec:
+      additionalLabels:
+        cluster-api-provider-stackit/e2e: "true"
+        cluster-api-provider-stackit/test-id: "%[2]s"
+      imageID: %[9]s
+      machineType: %[10]s
+      availabilityZone: %[11]s%[12]s
+      rootVolume:
+        sizeGiB: %[13]s
+        performanceClass: %[14]s
+        deleteOnTermination: true
+      network:
+        id: %[8]s%[15]s
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: MachineDeployment
+metadata:
+  name: %[1]s-md-0
+  namespace: %[3]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[2]s"
+spec:
+  clusterName: %[1]s
+  replicas: 1
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: %[1]s
+      cluster.x-k8s.io/deployment-name: %[1]s-md-0
+  template:
+    metadata:
+      labels:
+        cluster.x-k8s.io/cluster-name: %[1]s
+        cluster.x-k8s.io/deployment-name: %[1]s-md-0
+        cluster-api-provider-stackit/e2e: "true"
+        cluster-api-provider-stackit/test-id: "%[2]s"
+    spec:
+      clusterName: %[1]s
+      version: %[16]s
+      bootstrap:
+        configRef:
+          apiGroup: bootstrap.cluster.x-k8s.io
+          kind: KubeadmConfigTemplate
+          name: %[1]s-md-0
+      infrastructureRef:
+        apiGroup: infrastructure.cluster.x-k8s.io
+        kind: StackitMachineTemplate
+        name: %[1]s-md-0
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitMachineTemplate
+metadata:
+  name: %[1]s-md-0
+  namespace: %[3]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[2]s"
+spec:
+  template:
+    spec:
+      additionalLabels:
+        cluster-api-provider-stackit/e2e: "true"
+        cluster-api-provider-stackit/test-id: "%[2]s"
+      imageID: %[9]s
+      machineType: %[10]s
+      availabilityZone: %[11]s%[12]s
+      rootVolume:
+        sizeGiB: %[13]s
+        performanceClass: %[14]s
+        deleteOnTermination: true
+      network:
+        id: %[8]s%[15]s
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+kind: KubeadmConfigTemplate
+metadata:
+  name: %[1]s-md-0
+  namespace: %[3]s
+  labels:
+    cluster.x-k8s.io/cluster-name: %[1]s
+    cluster-api-provider-stackit/e2e: "true"
+    cluster-api-provider-stackit/test-id: "%[2]s"
+spec:
+  template:
+    spec:
+      preKubeadmCommands:
+%[18]s
+      joinConfiguration:
+        timeouts:
+          tlsBootstrapSeconds: 300
+        nodeRegistration:
+          name: '{{ ds.meta_data.local_hostname }}'
+          criSocket: unix:///var/run/containerd/containerd.sock
+          ignorePreflightErrors:
+            - NumCPU
+          kubeletExtraArgs:
+            - name: cloud-provider
+              value: external
+`, clusterName, testID, cfg.Namespace, cfg.ProjectID, cfg.Region, cfg.CredentialsSecretName, cfg.CredentialsSecretNS,
+		cfg.NetworkID, cfg.ImageID, cfg.MachineType, cfg.AvailabilityZone, sshKeyName, cfg.RootVolumeSizeGiB,
+		cfg.RootVolumePerformance, securityGroups, kubernetesVersion, controlPlanePreKubeadmCommands, workerPreKubeadmCommands)
+}
+
+func kubernetesAptRepoMinor(kubernetesVersion string) string {
+	version := strings.TrimPrefix(kubernetesVersion, "v")
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 {
+		return "v1.31"
+	}
+	return "v" + parts[0] + "." + parts[1]
+}
+
+func kubeadmPackageInstallCommands(kubernetesRepoMinor string) string {
+	return fmt.Sprintf(`- |
+  set -eu
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y apt-transport-https ca-certificates conntrack curl gpg containerd
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://pkgs.k8s.io/core:/stable:/%[1]s/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  chmod 0644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/%[1]s/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+  apt-get update
+  apt-get install -y kubelet kubeadm kubectl
+  apt-mark hold kubelet kubeadm kubectl
+  mkdir -p /etc/containerd
+  containerd config default > /etc/containerd/config.toml
+  sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+  systemctl restart containerd
+  modprobe br_netfilter
+  printf 'net.bridge.bridge-nf-call-iptables=1\nnet.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-kubernetes-cri.conf
+  sysctl --system
+  (journalctl -fu kubelet --no-pager > /dev/console 2>&1 &)`, kubernetesRepoMinor)
+}
+
+func indentBlock(value string, spaces int) string {
+	prefix := strings.Repeat(" ", spaces)
+	lines := strings.Split(value, "\n")
+	for i := range lines {
+		if lines[i] != "" {
+			lines[i] = prefix + lines[i]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func stackitE2ETags(testID string) map[string]string {
 	return map[string]string{
 		util.LabelE2E:    util.E2EValue,
@@ -1185,6 +1561,26 @@ func cleanupStackitMachineDeploymentScaleFixture(clusterName, namespace string) 
 		{"delete", "stackitcluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=10m"},
 		{"delete", "stackitmachinetemplate", clusterName + "-md-0", "-n", namespace, "--ignore-not-found"},
 		{"delete", "secret", clusterName + "-worker-bootstrap", "-n", namespace, "--ignore-not-found"},
+	} {
+		cmd := exec.Command("kubectl", args...)
+		if _, err := utils.Run(cmd); err != nil {
+			_, _ = fmt.Fprintf(GinkgoWriter, "cleanup warning: %v\n", err)
+		}
+	}
+}
+
+func cleanupStackitKubeadmClusterFixture(clusterName, namespace string) {
+	for _, args := range [][]string{
+		{"delete", "cluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=45m"},
+		{"delete", "kubeadmcontrolplane", clusterName + "-control-plane", "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=20m"},
+		{"delete", "machinedeployment", clusterName + "-md-0", "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=20m"},
+		{"delete", "machine", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name=" + clusterName, "--ignore-not-found", "--wait=true", "--timeout=20m"},
+		{"delete", "stackitmachine", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name=" + clusterName, "--ignore-not-found", "--wait=true", "--timeout=20m"},
+		{"delete", "stackitcluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=10m"},
+		{"delete", "stackitmachinetemplate", clusterName + "-control-plane", "-n", namespace, "--ignore-not-found"},
+		{"delete", "stackitmachinetemplate", clusterName + "-md-0", "-n", namespace, "--ignore-not-found"},
+		{"delete", "kubeadmconfigtemplate", clusterName + "-md-0", "-n", namespace, "--ignore-not-found"},
+		{"delete", "secret", clusterName + "-kubeconfig", "-n", namespace, "--ignore-not-found"},
 	} {
 		cmd := exec.Command("kubectl", args...)
 		if _, err := utils.Run(cmd); err != nil {
@@ -1236,8 +1632,18 @@ type capiMachineItem struct {
 		Name string `json:"name"`
 	} `json:"metadata"`
 	Spec struct {
-		ProviderID *string `json:"providerID"`
+		ProviderID        *string `json:"providerID"`
+		InfrastructureRef struct {
+			APIGroup string `json:"apiGroup"`
+			Kind     string `json:"kind"`
+			Name     string `json:"name"`
+		} `json:"infrastructureRef"`
 	} `json:"spec"`
+	Status struct {
+		NodeRef struct {
+			Name string `json:"name"`
+		} `json:"nodeRef"`
+	} `json:"status"`
 }
 
 func expectCAPIMachinesWithProviderIDs(g Gomega, namespace, clusterName string, want int) {
@@ -1253,6 +1659,210 @@ func expectCAPIMachinesWithProviderIDs(g Gomega, namespace, clusterName string, 
 	}
 }
 
+type workloadNodeList struct {
+	Items []workloadNodeItem `json:"items"`
+}
+
+type workloadNodeItem struct {
+	Metadata struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Spec struct {
+		ProviderID string `json:"providerID"`
+	} `json:"spec"`
+	Status struct {
+		Conditions []struct {
+			Type   string `json:"type"`
+			Status string `json:"status"`
+		} `json:"conditions"`
+	} `json:"status"`
+}
+
+func workloadKubeconfigFromSecret(g Gomega, clusterName, namespace string) string {
+	cmd := exec.Command("kubectl", "get", "secret", clusterName+"-kubeconfig", "-n", namespace, "-o", "json")
+	output, err := utils.Run(cmd)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	var secret struct {
+		Data map[string]string `json:"data"`
+	}
+	g.Expect(json.Unmarshal([]byte(output), &secret)).To(Succeed())
+	encoded := secret.Data["value"]
+	g.Expect(encoded).NotTo(BeEmpty(), "kubeconfig Secret %s-kubeconfig has no data.value", clusterName)
+	kubeconfig, err := base64.StdEncoding.DecodeString(encoded)
+	g.Expect(err).NotTo(HaveOccurred(), "Failed to decode workload kubeconfig")
+
+	path := filepath.Join(os.TempDir(), clusterName+".kubeconfig")
+	g.Expect(os.WriteFile(path, kubeconfig, 0o600)).To(Succeed())
+	return path
+}
+
+func kubectlOutputWithKubeconfig(g Gomega, kubeconfig string, args ...string) string {
+	allArgs := append([]string{"--kubeconfig", kubeconfig}, args...)
+	cmd := exec.Command("kubectl", allArgs...)
+	output, err := utils.Run(cmd)
+	g.Expect(err).NotTo(HaveOccurred())
+	return strings.TrimSpace(output)
+}
+
+func installWorkloadAddons(kubeconfig, clusterName string, cfg stackitVMConfig, credentials map[string][]byte) {
+	installWorkloadCNI(kubeconfig)
+
+	By("rendering cloud-provider-stackit addon")
+	serviceAccountJSON, ok := credentials["serviceaccount.json"]
+	Expect(ok).To(BeTrue(), "credentials Secret is missing serviceaccount.json")
+	addon := renderCloudProviderStackitAddon(clusterName, cfg, serviceAccountJSON)
+	addonPath := writeTempManifest("stackit-ccm-addon-*.yaml", addon)
+	defer func() {
+		_ = os.Remove(addonPath)
+	}()
+
+	By("installing cloud-provider-stackit addon")
+	cmd := exec.Command("kubectl", "--kubeconfig", kubeconfig, "apply", "-f", addonPath)
+	_, err := utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to install cloud-provider-stackit addon")
+
+	By("waiting for cloud-provider-stackit rollout")
+	cmd = exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", "kube-system", "rollout", "status",
+		"deployment/stackit-cloud-controller-manager", "--timeout=5m")
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "cloud-provider-stackit did not roll out")
+}
+
+func installWorkloadCNI(kubeconfig string) {
+	if cniManifest := os.Getenv("STACKIT_E2E_CNI_MANIFEST"); cniManifest != "" {
+		By("installing workload Cluster CNI from manifest")
+		cmd := exec.Command("kubectl", "--kubeconfig", kubeconfig, "apply", "-f", cniManifest)
+		_, err := utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to install workload Cluster CNI from %s", cniManifest)
+		return
+	}
+
+	switch cni := strings.ToLower(envDefault("STACKIT_E2E_CNI", "cilium")); cni {
+	case "cilium":
+		installCiliumCNI(kubeconfig)
+	case "calico":
+		installManifestCNI(kubeconfig, "Calico", envDefault("STACKIT_E2E_CALICO_MANIFEST", "https://raw.githubusercontent.com/projectcalico/calico/v3.30.0/manifests/calico.yaml"))
+	default:
+		Fail(fmt.Sprintf("unsupported STACKIT_E2E_CNI %q; use cilium, calico, or STACKIT_E2E_CNI_MANIFEST", cni))
+	}
+}
+
+func installCiliumCNI(kubeconfig string) {
+	version := envDefault("STACKIT_E2E_CILIUM_VERSION", "1.19.4")
+	args := []string{
+		"install",
+		"--kubeconfig", kubeconfig,
+		"--version", version,
+		"--set", "ipam.mode=cluster-pool",
+		"--set", "ipam.operator.clusterPoolIPv4PodCIDRList=" + envDefault("STACKIT_E2E_CILIUM_CLUSTER_POOL_IPV4_CIDR", "192.168.0.0/16"),
+		"--set", "ipam.operator.clusterPoolIPv4MaskSize=" + envDefault("STACKIT_E2E_CILIUM_CLUSTER_POOL_IPV4_MASK_SIZE", "24"),
+	}
+	if extraArgs := os.Getenv("STACKIT_E2E_CILIUM_INSTALL_ARGS"); extraArgs != "" {
+		args = append(args, strings.Fields(extraArgs)...)
+	}
+
+	By("installing Cilium into the workload Cluster")
+	cmd := exec.Command("cilium", args...)
+	_, err := utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to install Cilium")
+
+	By("waiting for Cilium rollout")
+	for _, resource := range []string{"deployment/cilium-operator", "daemonset/cilium", "daemonset/cilium-envoy"} {
+		cmd = exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", "kube-system", "rollout", "status", resource, "--timeout=10m")
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "%s did not roll out", resource)
+	}
+}
+
+func installManifestCNI(kubeconfig, name, manifest string) {
+	By(fmt.Sprintf("installing %s into the workload Cluster", name))
+	cmd := exec.Command("kubectl", "--kubeconfig", kubeconfig, "apply", "-f", manifest)
+	_, err := utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to install %s from %s", name, manifest)
+}
+
+func renderCloudProviderStackitAddon(clusterName string, cfg stackitVMConfig, serviceAccountJSON []byte) string {
+	addonBytes, err := os.ReadFile("templates/addons/cloud-provider-stackit.yaml")
+	Expect(err).NotTo(HaveOccurred(), "Failed to read cloud-provider-stackit addon template")
+	replacer := strings.NewReplacer(
+		"${CLUSTER_NAME}", clusterName,
+		"${STACKIT_PROJECT_ID}", cfg.ProjectID,
+		"${STACKIT_REGION}", cfg.Region,
+		"${STACKIT_NETWORK_ID}", cfg.NetworkID,
+		"${STACKIT_SERVICE_ACCOUNT_JSON_B64}", base64.StdEncoding.EncodeToString(serviceAccountJSON),
+		"${STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE:=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.31.11}",
+		envDefault("STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE", "ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.31.11"),
+	)
+	return replacer.Replace(string(addonBytes))
+}
+
+func expectWorkloadNodesReady(g Gomega, kubeconfig string, want int) {
+	nodes := workloadNodes(g, kubeconfig)
+	g.Expect(nodes).To(HaveLen(want))
+	for _, node := range nodes {
+		g.Expect(node.Spec.ProviderID).NotTo(BeEmpty(), "Node %s has no providerID", node.Metadata.Name)
+		g.Expect(node.Spec.ProviderID).To(HavePrefix("stackit://"), "Node %s has unexpected providerID", node.Metadata.Name)
+		g.Expect(nodeReady(node)).To(BeTrue(), "Node %s is not Ready", node.Metadata.Name)
+	}
+}
+
+func expectProviderIDNodeRefAlignment(g Gomega, namespace, clusterName, testID, kubeconfig string, want int) {
+	machines := capiMachinesForCluster(g, namespace, clusterName)
+	g.Expect(machines).To(HaveLen(want))
+
+	stackitMachines := map[string]stackitMachineItem{}
+	for _, machine := range stackitMachinesForTestID(g, namespace, testID) {
+		stackitMachines[machine.Metadata.Name] = machine
+	}
+	nodes := map[string]workloadNodeItem{}
+	for _, node := range workloadNodes(g, kubeconfig) {
+		nodes[node.Metadata.Name] = node
+	}
+
+	for _, machine := range machines {
+		g.Expect(machine.Spec.ProviderID).NotTo(BeNil(), "Machine %s has no providerID", machine.Metadata.Name)
+		g.Expect(machine.Spec.InfrastructureRef.Name).NotTo(BeEmpty(), "Machine %s has no infrastructureRef.name", machine.Metadata.Name)
+		stackitMachine, ok := stackitMachines[machine.Spec.InfrastructureRef.Name]
+		g.Expect(ok).To(BeTrue(), "StackitMachine %s referenced by Machine %s not found", machine.Spec.InfrastructureRef.Name, machine.Metadata.Name)
+		g.Expect(stackitMachine.Spec.ProviderID).NotTo(BeNil(), "StackitMachine %s has no spec providerID", stackitMachine.Metadata.Name)
+		g.Expect(*stackitMachine.Spec.ProviderID).To(Equal(stackitMachine.Status.ProviderID), "StackitMachine %s spec/status providerID mismatch", stackitMachine.Metadata.Name)
+		g.Expect(*machine.Spec.ProviderID).To(Equal(stackitMachine.Status.ProviderID), "Machine %s providerID does not match StackitMachine %s", machine.Metadata.Name, stackitMachine.Metadata.Name)
+
+		g.Expect(machine.Status.NodeRef.Name).NotTo(BeEmpty(), "Machine %s has no status.nodeRef.name", machine.Metadata.Name)
+		node, ok := nodes[machine.Status.NodeRef.Name]
+		g.Expect(ok).To(BeTrue(), "Node %s referenced by Machine %s not found", machine.Status.NodeRef.Name, machine.Metadata.Name)
+		g.Expect(node.Spec.ProviderID).To(Equal(stackitMachine.Status.ProviderID), "Node %s providerID does not match Machine %s", node.Metadata.Name, machine.Metadata.Name)
+	}
+}
+
+func capiMachinesForCluster(g Gomega, namespace, clusterName string) []capiMachineItem {
+	cmd := exec.Command("kubectl", "get", "machines", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name="+clusterName, "-o", "json")
+	output, err := utils.Run(cmd)
+	g.Expect(err).NotTo(HaveOccurred())
+	var list capiMachineList
+	g.Expect(json.Unmarshal([]byte(output), &list)).To(Succeed())
+	return list.Items
+}
+
+func workloadNodes(g Gomega, kubeconfig string) []workloadNodeItem {
+	cmd := exec.Command("kubectl", "--kubeconfig", kubeconfig, "get", "nodes", "-o", "json")
+	output, err := utils.Run(cmd)
+	g.Expect(err).NotTo(HaveOccurred())
+	var list workloadNodeList
+	g.Expect(json.Unmarshal([]byte(output), &list)).To(Succeed())
+	return list.Items
+}
+
+func nodeReady(node workloadNodeItem) bool {
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == "Ready" {
+			return condition.Status == "True"
+		}
+	}
+	return false
+}
+
 func readyStackitMachineInstanceIDs(g Gomega, namespace, testID string, want int) []string {
 	return instanceIDs(readyStackitMachines(g, namespace, testID, want))
 }
@@ -1261,13 +1871,30 @@ func readyStackitMachines(g Gomega, namespace, testID string, want int) []stacki
 	machines := stackitMachinesForTestID(g, namespace, testID)
 	g.Expect(machines).To(HaveLen(want))
 	for _, machine := range machines {
-		g.Expect(machine.Status.Ready).To(BeTrue(), "StackitMachine %s is not ready", machine.Metadata.Name)
-		g.Expect(machine.Status.InstanceID).NotTo(BeEmpty(), "StackitMachine %s has no instanceID", machine.Metadata.Name)
-		g.Expect(machine.Status.ProviderID).To(Equal("stackit://"+machine.Status.InstanceID), "StackitMachine %s has unexpected status providerID", machine.Metadata.Name)
-		g.Expect(machine.Spec.ProviderID).NotTo(BeNil(), "StackitMachine %s has no spec providerID", machine.Metadata.Name)
-		g.Expect(*machine.Spec.ProviderID).To(Equal(machine.Status.ProviderID), "StackitMachine %s spec/status providerID mismatch", machine.Metadata.Name)
+		expectReadyStackitMachine(g, machine)
 	}
 	return machines
+}
+
+func readyStackitMachineByNamePart(g Gomega, namespace, testID, namePart string) stackitMachineItem {
+	machines := stackitMachinesForTestID(g, namespace, testID)
+	var matches []stackitMachineItem
+	for _, machine := range machines {
+		if strings.Contains(machine.Metadata.Name, namePart) {
+			matches = append(matches, machine)
+		}
+	}
+	g.Expect(matches).To(HaveLen(1), "expected one StackitMachine containing %q", namePart)
+	expectReadyStackitMachine(g, matches[0])
+	return matches[0]
+}
+
+func expectReadyStackitMachine(g Gomega, machine stackitMachineItem) {
+	g.Expect(machine.Status.Ready).To(BeTrue(), "StackitMachine %s is not ready", machine.Metadata.Name)
+	g.Expect(machine.Status.InstanceID).NotTo(BeEmpty(), "StackitMachine %s has no instanceID", machine.Metadata.Name)
+	g.Expect(machine.Status.ProviderID).To(Equal("stackit://"+machine.Status.InstanceID), "StackitMachine %s has unexpected status providerID", machine.Metadata.Name)
+	g.Expect(machine.Spec.ProviderID).NotTo(BeNil(), "StackitMachine %s has no spec providerID", machine.Metadata.Name)
+	g.Expect(*machine.Spec.ProviderID).To(Equal(machine.Status.ProviderID), "StackitMachine %s spec/status providerID mismatch", machine.Metadata.Name)
 }
 
 func instanceIDs(machines []stackitMachineItem) []string {

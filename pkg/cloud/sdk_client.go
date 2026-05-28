@@ -33,6 +33,8 @@ const (
 
 	apiserverTargetPoolName = "apiserver"
 	apiserverListenerName   = "apiserver"
+	bootstrapTargetName     = "capi-bootstrap-placeholder"
+	bootstrapTargetIP       = "10.0.0.1"
 )
 
 // SDKClient is the STACKIT SDK-backed implementation of Client.
@@ -165,6 +167,7 @@ func (c *SDKClient) CreateServer(ctx context.Context, input CreateServerInput) (
 	}
 	if len(input.UserData) > 0 {
 		payload.SetUserData(base64.StdEncoding.EncodeToString(input.UserData))
+		payload.SetConfigDrive(true)
 	}
 	if useBootVolume {
 		bootVolume := iaas.NewBootVolume()
@@ -208,9 +211,11 @@ func (c *SDKClient) GetNetwork(ctx context.Context, id string) (*Network, error)
 	if err != nil {
 		return nil, classifySDKError("get network", err)
 	}
+	ipv4 := network.GetIpv4()
 	return &Network{
-		ID:   network.GetId(),
-		Name: network.GetName(),
+		ID:           network.GetId(),
+		Name:         network.GetName(),
+		IPv4Prefixes: ipv4.GetPrefixes(),
 	}, nil
 }
 
@@ -220,10 +225,6 @@ func (c *SDKClient) EnsureAPIServerLoadBalancer(ctx context.Context, input LoadB
 	} else if !IsNotFound(err) && !isLoadBalancerServiceNotEnabled(err) {
 		return nil, err
 	}
-	if len(input.Targets) == 0 {
-		return nil, fmt.Errorf("%w: at least one API server load balancer target is required", ErrInvalidInput)
-	}
-
 	payload := lb.NewCreateLoadBalancerPayload()
 	payload.SetName(input.Name)
 	payload.SetRegion(input.Region)
@@ -243,11 +244,18 @@ func (c *SDKClient) EnsureAPIServerLoadBalancer(ctx context.Context, input LoadB
 	targetPool.SetName(apiserverTargetPoolName)
 	targetPool.SetTargetPort(input.Port)
 	targets := make([]lb.Target, 0, len(input.Targets))
-	for _, targetInput := range input.Targets {
+	if len(input.Targets) == 0 {
 		target := lb.NewTarget()
-		target.SetDisplayName(targetInput.Name)
-		target.SetIp(targetInput.IP)
+		target.SetDisplayName(bootstrapTargetName)
+		target.SetIp(bootstrapTargetIP)
 		targets = append(targets, *target)
+	} else {
+		for _, targetInput := range input.Targets {
+			target := lb.NewTarget()
+			target.SetDisplayName(targetInput.Name)
+			target.SetIp(targetInput.IP)
+			targets = append(targets, *target)
+		}
 	}
 	targetPool.SetTargets(targets)
 	payload.SetTargetPools([]lb.TargetPool{*targetPool})
@@ -311,7 +319,7 @@ func (c *SDKClient) EnsureAPIServerLoadBalancerTarget(ctx context.Context, input
 		return fmt.Errorf("%w: load balancer %q has no %q target pool", ErrNotFound, input.LoadBalancerID, apiserverTargetPoolName)
 	}
 
-	targets := targetPool.GetTargets()
+	targets := withoutBootstrapTarget(targetPool.GetTargets())
 	for i := range targets {
 		if targets[i].GetDisplayName() == input.Name || targets[i].GetIp() == input.IP {
 			targets[i].SetDisplayName(input.Name)
@@ -325,6 +333,17 @@ func (c *SDKClient) EnsureAPIServerLoadBalancerTarget(ctx context.Context, input
 	target.SetIp(input.IP)
 	targets = append(targets, *target)
 	return c.updateAPIServerTargetPool(ctx, input.LoadBalancerID, targetPool, targets, input.Port)
+}
+
+func withoutBootstrapTarget(targets []lb.Target) []lb.Target {
+	out := targets[:0]
+	for _, target := range targets {
+		if target.GetDisplayName() == bootstrapTargetName {
+			continue
+		}
+		out = append(out, target)
+	}
+	return out
 }
 
 func (c *SDKClient) DeleteAPIServerLoadBalancerTarget(ctx context.Context, input LoadBalancerTargetInput) error {

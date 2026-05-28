@@ -112,6 +112,21 @@ func setupClusterAPI() {
 	cmd := exec.Command("clusterctl", "init", "--core", "cluster-api", "--bootstrap", "kubeadm", "--control-plane", "kubeadm")
 	_, err := utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install Cluster API providers")
+
+	waitForDeploymentAvailable("capi-controller-manager", "capi-system")
+	waitForDeploymentAvailable("capi-kubeadm-bootstrap-controller-manager", "capi-kubeadm-bootstrap-system")
+	waitForDeploymentAvailable("capi-kubeadm-control-plane-controller-manager", "capi-kubeadm-control-plane-system")
+}
+
+func waitForDeploymentAvailable(name, namespace string) {
+	By(fmt.Sprintf("waiting for %s/%s to become available", namespace, name))
+	cmd := exec.Command("kubectl", "wait", "deployment.apps/"+name,
+		"--for", "condition=Available",
+		"--namespace", namespace,
+		"--timeout", "5m",
+	)
+	_, err := utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Deployment %s/%s did not become available", namespace, name)
 }
 
 // teardownCertManager uninstalls CertManager if it was installed by setupCertManager.

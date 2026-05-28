@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: example.com/cluster-api-provider-stackit
-  newTag: dev
+  newTag: v0.0.1

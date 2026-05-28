@@ -54,23 +54,17 @@ spec:
     initConfiguration:
       nodeRegistration:
         name: '{{ ds.meta_data.local_hostname }}'
+        criSocket: unix:///var/run/containerd/containerd.sock
         kubeletExtraArgs:
           - name: cloud-provider
             value: external
-        taints:
-          - key: node.cloudprovider.kubernetes.io/uninitialized
-            value: "true"
-            effect: NoSchedule
     joinConfiguration:
       nodeRegistration:
         name: '{{ ds.meta_data.local_hostname }}'
+        criSocket: unix:///var/run/containerd/containerd.sock
         kubeletExtraArgs:
           - name: cloud-provider
             value: external
-        taints:
-          - key: node.cloudprovider.kubernetes.io/uninitialized
-            value: "true"
-            effect: NoSchedule
     clusterConfiguration:
       apiServer:
         extraArgs:
@@ -158,10 +152,7 @@ spec:
       joinConfiguration:
         nodeRegistration:
           name: '{{ ds.meta_data.local_hostname }}'
+          criSocket: unix:///var/run/containerd/containerd.sock
           kubeletExtraArgs:
             - name: cloud-provider
               value: external
-          taints:
-            - key: node.cloudprovider.kubernetes.io/uninitialized
-              value: "true"
-              effect: NoSchedule

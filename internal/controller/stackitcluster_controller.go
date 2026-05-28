@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -41,8 +43,12 @@ import (
 	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/util"
 )
 
-// defaultAPIServerPort is used when an LB is created without an explicit port.
-const defaultAPIServerPort int32 = 6443
+const (
+	// defaultAPIServerPort is used when an LB is created without an explicit port.
+	defaultAPIServerPort int32 = 6443
+
+	bootstrapTargetName = "capi-bootstrap-placeholder"
+)
 
 // StackitClusterReconciler reconciles a StackitCluster object.
 type StackitClusterReconciler struct {
@@ -128,7 +134,8 @@ func (r *StackitClusterReconciler) reconcileNormal(ctx context.Context, s *scope
 	util.SetCondition(&sc.Status.Conditions, infrav1.ClusterCredentialsReadyCondition,
 		metav1.ConditionTrue, "Available", "", sc.Generation)
 
-	if _, err := cloudClient.GetNetwork(ctx, sc.Spec.Network.ID); err != nil {
+	network, err := cloudClient.GetNetwork(ctx, sc.Spec.Network.ID)
+	if err != nil {
 		sc.Status.Ready = false
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterNetworkReadyCondition,
 			metav1.ConditionFalse, "NetworkNotFound", err.Error(), sc.Generation)
@@ -143,13 +150,45 @@ func (r *StackitClusterReconciler) reconcileNormal(ctx context.Context, s *scope
 		metav1.ConditionTrue, "Available", "", sc.Generation)
 
 	if sc.Spec.APIServerLoadBalancer.Enabled {
-		if sc.Status.APIServerLoadBalancerID == "" {
-			if sc.Spec.ControlPlaneEndpoint.Host != "" {
-				sc.Status.APIServerEndpoint = sc.Spec.ControlPlaneEndpoint
-			}
+		lb, err := cloudClient.EnsureAPIServerLoadBalancer(ctx, cloud.LoadBalancerInput{
+			Name:      sc.Name + "-apiserver",
+			ProjectID: sc.Spec.ProjectID,
+			Region:    sc.Spec.Region,
+			NetworkID: sc.Spec.Network.ID,
+			Port:      defaultAPIServerPort,
+			Tags:      util.ClusterTags(sc.Name, sc.Namespace, sc.Spec.AdditionalLabels),
+			Targets: []cloud.LoadBalancerTargetInput{{
+				Name: bootstrapTargetName,
+				IP:   bootstrapTargetIP(network),
+				Port: defaultAPIServerPort,
+			}},
+		})
+		if err != nil {
+			sc.Status.Ready = false
 			util.SetCondition(&sc.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition,
-				metav1.ConditionFalse, "Provisioning", "waiting for first control-plane machine target", sc.Generation)
+				metav1.ConditionFalse, "LoadBalancerError", err.Error(), sc.Generation)
+			util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
+				metav1.ConditionFalse, "LoadBalancerError", err.Error(), sc.Generation)
+			if cloud.IsRetryable(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			return ctrl.Result{}, nil
 		}
+		if lb != nil {
+			sc.Status.APIServerLoadBalancerID = lb.ID
+		}
+		if lb == nil || lb.IP == "" {
+			sc.Status.Ready = false
+			util.SetCondition(&sc.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition,
+				metav1.ConditionFalse, "Provisioning", "waiting for API server load balancer IP address", sc.Generation)
+			util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
+				metav1.ConditionFalse, "Provisioning", "waiting for API server load balancer IP address", sc.Generation)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+		sc.Spec.ControlPlaneEndpoint = clusterv1.APIEndpoint{Host: lb.IP, Port: defaultAPIServerPort}
+		sc.Status.APIServerEndpoint = sc.Spec.ControlPlaneEndpoint
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition,
+			metav1.ConditionTrue, "Available", "", sc.Generation)
 	} else if sc.Spec.ControlPlaneEndpoint.Host != "" {
 		sc.Status.APIServerEndpoint = sc.Spec.ControlPlaneEndpoint
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition,
@@ -196,6 +235,26 @@ func stackitFailureDomains(region string) []clusterv1.FailureDomain {
 			},
 		},
 	}
+}
+
+func bootstrapTargetIP(network *cloud.Network) string {
+	if network == nil {
+		return "10.0.0.1"
+	}
+	for _, prefixValue := range network.IPv4Prefixes {
+		prefix, err := netip.ParsePrefix(prefixValue)
+		if err != nil || !prefix.Addr().Is4() {
+			continue
+		}
+		address := prefix.Masked().Addr()
+		for i := 0; i < 10; i++ {
+			address = address.Next()
+		}
+		if prefix.Contains(address) {
+			return address.String()
+		}
+	}
+	return "10.0.0.1"
 }
 
 func (r *StackitClusterReconciler) reconcileDelete(ctx context.Context, s *scope.ClusterScope) (ctrl.Result, error) {

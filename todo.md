@@ -90,9 +90,10 @@
 - [x] PR 5: Add clusterctl release packaging.
   - [x] Generate `infrastructure-components.yaml`, `metadata.yaml`, `cluster-template.yaml`, and `cluster-template-development.yaml`.
   - [x] Verify `clusterctl init --infrastructure stackit` and `clusterctl generate cluster`.
-- [ ] PR 6: Add worker scale e2e coverage.
-  - [ ] Scale workers from 1 to 3 and back to 1.
-  - [ ] Verify providerIDs, node readiness/removal, and no orphaned cloud resources.
+- [x] PR 6: Add worker scale e2e coverage.
+  - [x] Scale workers from 1 to 3 and back to 1.
+  - [x] Verify providerIDs and no orphaned cloud resources.
+  - [ ] Verify worker Node readiness/removal once workload-cluster bootstrap is enabled.
 - [ ] PR 7: Add Kubernetes upgrade e2e coverage.
   - [ ] Exercise KubeadmControlPlane and MachineDeployment rolling upgrades.
   - [ ] Verify replacement VMs become Ready and old VMs are deleted.

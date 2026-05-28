@@ -91,6 +91,7 @@ spec:
     spec:
       imageID: ${STACKIT_IMAGE_ID}
       machineType: ${STACKIT_MACHINE_TYPE}
+      availabilityZone: ${STACKIT_AVAILABILITY_ZONE}
       sshKeyName: ${STACKIT_SSH_KEY_NAME}
       rootVolume:
         sizeGiB: 50
@@ -98,6 +99,8 @@ spec:
         deleteOnTermination: true
       network:
         id: ${STACKIT_NETWORK_ID}
+      securityGroups:
+        - ${STACKIT_SECURITY_GROUP_ID}
 ---
 apiVersion: cluster.x-k8s.io/v1beta2
 kind: MachineDeployment
@@ -139,6 +142,7 @@ spec:
     spec:
       imageID: ${STACKIT_IMAGE_ID}
       machineType: ${STACKIT_MACHINE_TYPE}
+      availabilityZone: ${STACKIT_AVAILABILITY_ZONE}
       sshKeyName: ${STACKIT_SSH_KEY_NAME}
       rootVolume:
         sizeGiB: 50
@@ -146,6 +150,8 @@ spec:
         deleteOnTermination: true
       network:
         id: ${STACKIT_NETWORK_ID}
+      securityGroups:
+        - ${STACKIT_SECURITY_GROUP_ID}
 ---
 apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
 kind: KubeadmConfigTemplate

@@ -1,5 +1,10 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+# Directory used for generated clusterctl release assets.
+CLUSTERCTL_PROVIDER ?= stackit
+CLUSTERCTL_RELEASE_VERSION ?= v0.1.0
+CLUSTERCTL_RELEASE_ROOT ?= dist/clusterctl
+CLUSTERCTL_RELEASE_DIR ?= $(CLUSTERCTL_RELEASE_ROOT)/infrastructure-$(CLUSTERCTL_PROVIDER)/$(CLUSTERCTL_RELEASE_VERSION)
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
@@ -153,6 +158,19 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	mkdir -p dist
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	"$(KUSTOMIZE)" build config/default > dist/install.yaml
+
+.PHONY: clusterctl-release
+clusterctl-release: manifests generate kustomize ## Generate clusterctl release assets.
+	rm -rf "$(CLUSTERCTL_RELEASE_DIR)"
+	mkdir -p "$(CLUSTERCTL_RELEASE_DIR)"
+	tmp_dir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$tmp_dir"' EXIT; \
+	cp -R config "$$tmp_dir/config"; \
+	cd "$$tmp_dir/config/manager" && "$(KUSTOMIZE)" edit set image controller=${IMG}; \
+	"$(KUSTOMIZE)" build "$$tmp_dir/config/default" > "$(CURDIR)/$(CLUSTERCTL_RELEASE_DIR)/infrastructure-components.yaml"
+	cp metadata.yaml "$(CLUSTERCTL_RELEASE_DIR)/metadata.yaml"
+	cp templates/cluster-template.yaml "$(CLUSTERCTL_RELEASE_DIR)/cluster-template.yaml"
+	cp templates/cluster-template-development.yaml "$(CLUSTERCTL_RELEASE_DIR)/cluster-template-development.yaml"
 
 ##@ Deployment
 

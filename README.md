@@ -64,6 +64,8 @@ The generated provider ID format is `stackit://<server-id>`, matching `cloud-pro
 ## Cluster Template
 
 `templates/cluster-template.yaml` is intended for `clusterctl generate cluster`.
+Release assets for a local or published clusterctl repository can be generated
+with `make clusterctl-release`.
 
 Example:
 
@@ -78,9 +80,8 @@ export STACKIT_REGION=eu01
 export STACKIT_NETWORK_ID=3a87ac2f-8297-4dea-a9da-11d3c19e45fe
 export STACKIT_IMAGE_ID=3ad2867e-695b-4ee6-9502-b563013413d4 # non-ARM Ubuntu 22.04 in eu01
 export STACKIT_MACHINE_TYPE=c2i.1
-export STACKIT_AVAILABILITY_ZONE=eu01-1
 export STACKIT_SSH_KEY_NAME=<ssh-key-name>
-export STACKIT_SECURITY_GROUP_ID=<security-group-uuid>
+export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
 
 clusterctl generate cluster "$CLUSTER_NAME" \
   --from templates/cluster-template.yaml \
@@ -201,6 +202,32 @@ make build-installer IMG=<registry>/cluster-api-provider-stackit:<tag>
 ```
 
 This writes `dist/install.yaml`, which can be published for `kubectl apply -f ...` installation. A Helm chart has not been selected as the default distribution path yet.
+
+Clusterctl release assets can be generated with:
+
+```sh
+make clusterctl-release IMG=<registry>/cluster-api-provider-stackit:<tag>
+```
+
+This writes `infrastructure-components.yaml`, `metadata.yaml`,
+`cluster-template.yaml`, and `cluster-template-development.yaml` under
+`dist/clusterctl/infrastructure-stackit/v0.1.0/`, which matches clusterctl's
+local repository layout.
+
+For local validation, generate the release assets, export the STACKIT template
+variables shown above, and use:
+
+```sh
+export STACKIT_CLUSTERCTL_REPOSITORY="$(pwd)/dist/clusterctl"
+
+clusterctl init --config hack/clusterctl-local.yaml --infrastructure stackit:v0.1.0
+clusterctl generate cluster stackit-test \
+  --config hack/clusterctl-local.yaml \
+  --infrastructure stackit:v0.1.0 \
+  --kubernetes-version v1.31.0 \
+  --control-plane-machine-count 1 \
+  --worker-machine-count 1
+```
 
 ## Contributing
 

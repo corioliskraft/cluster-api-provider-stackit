@@ -87,9 +87,9 @@
   - [x] Add provider-managed and e2e/test-id labels to STACKIT resources so leaks can be selected reproducibly.
   - [x] Extend the real VM e2e scenario to pre-clean, tag resources, and assert no tagged VMs or load balancers remain.
   - [x] Add `make cleanup-stackit` backed by direct STACKIT API cleanup using required test tags.
-- [ ] PR 5: Add clusterctl release packaging.
-  - [ ] Generate `infrastructure-components.yaml`, `metadata.yaml`, `cluster-template.yaml`, and `cluster-template-development.yaml`.
-  - [ ] Verify `clusterctl init --infrastructure stackit` and `clusterctl generate cluster`.
+- [x] PR 5: Add clusterctl release packaging.
+  - [x] Generate `infrastructure-components.yaml`, `metadata.yaml`, `cluster-template.yaml`, and `cluster-template-development.yaml`.
+  - [x] Verify `clusterctl init --infrastructure stackit` and `clusterctl generate cluster`.
 - [ ] PR 6: Add worker scale e2e coverage.
   - [ ] Scale workers from 1 to 3 and back to 1.
   - [ ] Verify providerIDs, node readiness/removal, and no orphaned cloud resources.

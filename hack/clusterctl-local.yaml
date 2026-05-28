@@ -1,0 +1,4 @@
+providers:
+  - name: stackit
+    url: ${STACKIT_CLUSTERCTL_REPOSITORY}/infrastructure-stackit/latest/infrastructure-components.yaml
+    type: InfrastructureProvider

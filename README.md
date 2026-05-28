@@ -230,6 +230,15 @@ clusterctl generate cluster stackit-test \
   --worker-machine-count 1
 ```
 
+The local clusterctl configuration enables the CAPI `ClusterTopology` feature
+gate. This is required before applying `templates/clusterclass.yaml` or any
+Cluster with `spec.topology`, because the CAPI and kubeadm-control-plane
+webhooks reject those resources while the feature gate is disabled.
+For an already initialized management cluster, either re-initialize the CAPI
+providers with this config or patch the `--feature-gates` argument on the CAPI
+core and kubeadm-control-plane controller manager Deployments so
+`ClusterTopology=true`.
+
 ## Contributing
 
 Before sending changes, run:

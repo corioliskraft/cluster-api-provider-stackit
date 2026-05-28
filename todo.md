@@ -95,8 +95,11 @@
   - [x] Verify providerIDs and no orphaned cloud resources.
   - [ ] Verify worker Node readiness/removal once workload-cluster bootstrap is enabled.
 - [ ] PR 7: Add Kubernetes upgrade e2e coverage.
-  - [ ] Exercise KubeadmControlPlane and MachineDeployment rolling upgrades.
-  - [ ] Verify replacement VMs become Ready and old VMs are deleted.
+  - [x] Verify MachineDeployment version changes create replacement worker VMs.
+  - [x] Verify replacement worker VMs become Ready and old worker VMs are deleted when the old Machine is removed.
+  - [ ] Exercise automatic MachineDeployment rolling completion once workload-cluster Node availability is enabled.
+  - [ ] Exercise KubeadmControlPlane upgrades once workload-cluster bootstrap is enabled.
+  - [ ] Verify upgraded Nodes join and the workload cluster remains reachable once bootstrap is enabled.
 - [ ] PR 8: Model STACKIT availability zones as CAPI FailureDomains.
   - [ ] Publish failureDomains in StackitCluster status.
   - [ ] Validate StackitMachine availability zones and preserve single-AZ templates.

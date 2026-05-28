@@ -210,7 +210,8 @@ make clusterctl-release IMG=<registry>/cluster-api-provider-stackit:<tag>
 ```
 
 This writes `infrastructure-components.yaml`, `metadata.yaml`,
-`cluster-template.yaml`, and `cluster-template-development.yaml` under
+`clusterclass.yaml`, `cluster-template.yaml`,
+`cluster-template-development.yaml`, and `cluster-template-topology.yaml` under
 `dist/clusterctl/infrastructure-stackit/v0.1.0/`, which matches clusterctl's
 local repository layout.
 

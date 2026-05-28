@@ -104,5 +104,7 @@
   - [x] Publish failureDomains in StackitCluster status.
   - [x] Validate StackitMachine availability zones and preserve single-AZ templates.
 - [ ] PR 9: Add ClusterClass support.
-  - [ ] Add ClusterClass and topology templates after create/delete, scale, and upgrade flows are stable.
+  - [x] Add ClusterClass and topology templates after create/delete, scale, and upgrade flows are stable.
+  - [x] Wire Kubernetes version, control-plane replicas, worker replicas, machine type, image ID, region, network ID, SSH key name, and credentials secret through topology variables.
+  - [ ] Verify full ClusterClass create/ready/delete flow once workload-cluster bootstrap and node readiness are enabled.
 - [ ] Decide on release/distribution flow: installer YAML, Helm chart, or both.

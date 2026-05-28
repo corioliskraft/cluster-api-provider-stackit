@@ -1,0 +1,325 @@
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: ClusterClass
+metadata:
+  name: stackit
+spec:
+  infrastructure:
+    templateRef:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+      kind: StackitClusterTemplate
+      name: stackit-cluster
+  controlPlane:
+    templateRef:
+      apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+      kind: KubeadmControlPlaneTemplate
+      name: stackit-control-plane
+    machineInfrastructure:
+      templateRef:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+        kind: StackitMachineTemplate
+        name: stackit-control-plane
+  workers:
+    machineDeployments:
+      - class: default-worker
+        bootstrap:
+          templateRef:
+            apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+            kind: KubeadmConfigTemplate
+            name: stackit-default-worker
+        infrastructure:
+          templateRef:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitMachineTemplate
+            name: stackit-default-worker
+  variables:
+    - name: stackitProjectID
+      required: true
+      schema:
+        openAPIV3Schema:
+          type: string
+          description: STACKIT project ID used for cluster infrastructure.
+    - name: stackitRegion
+      required: true
+      schema:
+        openAPIV3Schema:
+          type: string
+          description: STACKIT region used for cluster infrastructure.
+    - name: stackitNetworkID
+      required: true
+      schema:
+        openAPIV3Schema:
+          type: string
+          description: Existing STACKIT network ID used by cluster machines.
+    - name: stackitImageID
+      required: true
+      schema:
+        openAPIV3Schema:
+          type: string
+          description: STACKIT image ID used by cluster machines.
+    - name: stackitMachineType
+      required: true
+      schema:
+        openAPIV3Schema:
+          type: string
+          description: STACKIT machine type used by control plane and worker machines.
+    - name: stackitSSHKeyName
+      required: false
+      schema:
+        openAPIV3Schema:
+          type: string
+          description: Existing STACKIT SSH key name injected into machines.
+    - name: stackitCredentialsSecretName
+      required: true
+      schema:
+        openAPIV3Schema:
+          type: string
+          description: Kubernetes Secret name containing STACKIT credentials.
+  patches:
+    - name: stackitProjectID
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitClusterTemplate
+            matchResources:
+              infrastructureCluster: true
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/projectID
+              valueFrom:
+                variable: stackitProjectID
+    - name: stackitRegion
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitClusterTemplate
+            matchResources:
+              infrastructureCluster: true
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/region
+              valueFrom:
+                variable: stackitRegion
+    - name: stackitNetworkID
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitClusterTemplate
+            matchResources:
+              infrastructureCluster: true
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/network/id
+              valueFrom:
+                variable: stackitNetworkID
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitMachineTemplate
+            matchResources:
+              controlPlane: true
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/network/id
+              valueFrom:
+                variable: stackitNetworkID
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitMachineTemplate
+            matchResources:
+              machineDeploymentClass:
+                names:
+                  - default-worker
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/network/id
+              valueFrom:
+                variable: stackitNetworkID
+    - name: stackitImageID
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitMachineTemplate
+            matchResources:
+              controlPlane: true
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/imageID
+              valueFrom:
+                variable: stackitImageID
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitMachineTemplate
+            matchResources:
+              machineDeploymentClass:
+                names:
+                  - default-worker
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/imageID
+              valueFrom:
+                variable: stackitImageID
+    - name: stackitMachineType
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitMachineTemplate
+            matchResources:
+              controlPlane: true
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/machineType
+              valueFrom:
+                variable: stackitMachineType
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitMachineTemplate
+            matchResources:
+              machineDeploymentClass:
+                names:
+                  - default-worker
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/machineType
+              valueFrom:
+                variable: stackitMachineType
+    - name: stackitSSHKeyName
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitMachineTemplate
+            matchResources:
+              controlPlane: true
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/sshKeyName
+              valueFrom:
+                variable: stackitSSHKeyName
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitMachineTemplate
+            matchResources:
+              machineDeploymentClass:
+                names:
+                  - default-worker
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/sshKeyName
+              valueFrom:
+                variable: stackitSSHKeyName
+    - name: stackitCredentialsSecretName
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitClusterTemplate
+            matchResources:
+              infrastructureCluster: true
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/credentialsSecretRef/name
+              valueFrom:
+                variable: stackitCredentialsSecretName
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitClusterTemplate
+metadata:
+  name: stackit-cluster
+spec:
+  template:
+    spec:
+      projectID: 00000000-0000-0000-0000-000000000000
+      region: eu01
+      credentialsSecretRef:
+        name: stackit-credentials
+      network:
+        id: 00000000-0000-0000-0000-000000000000
+      apiServerLoadBalancer:
+        enabled: true
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+kind: KubeadmControlPlaneTemplate
+metadata:
+  name: stackit-control-plane
+spec:
+  template:
+    spec:
+      kubeadmConfigSpec:
+        initConfiguration:
+          nodeRegistration:
+            name: "{{ ds.meta_data.local_hostname }}"
+            kubeletExtraArgs:
+              - name: cloud-provider
+                value: external
+            taints:
+              - key: node.cloudprovider.kubernetes.io/uninitialized
+                value: "true"
+                effect: NoSchedule
+        joinConfiguration:
+          nodeRegistration:
+            name: "{{ ds.meta_data.local_hostname }}"
+            kubeletExtraArgs:
+              - name: cloud-provider
+                value: external
+            taints:
+              - key: node.cloudprovider.kubernetes.io/uninitialized
+                value: "true"
+                effect: NoSchedule
+        clusterConfiguration:
+          apiServer:
+            extraArgs:
+              - name: cloud-provider
+                value: external
+          controllerManager:
+            extraArgs:
+              - name: cloud-provider
+                value: external
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitMachineTemplate
+metadata:
+  name: stackit-control-plane
+spec:
+  template:
+    spec:
+      imageID: 00000000-0000-0000-0000-000000000000
+      machineType: c2i.2
+      sshKeyName: stackit
+      rootVolume:
+        sizeGiB: 50
+        performanceClass: storage_premium_perf6
+        deleteOnTermination: true
+      network:
+        id: 00000000-0000-0000-0000-000000000000
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitMachineTemplate
+metadata:
+  name: stackit-default-worker
+spec:
+  template:
+    spec:
+      imageID: 00000000-0000-0000-0000-000000000000
+      machineType: c2i.2
+      sshKeyName: stackit
+      rootVolume:
+        sizeGiB: 50
+        performanceClass: storage_premium_perf6
+        deleteOnTermination: true
+      network:
+        id: 00000000-0000-0000-0000-000000000000
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+kind: KubeadmConfigTemplate
+metadata:
+  name: stackit-default-worker
+spec:
+  template:
+    spec:
+      joinConfiguration:
+        nodeRegistration:
+          name: "{{ ds.meta_data.local_hostname }}"
+          kubeletExtraArgs:
+            - name: cloud-provider
+              value: external
+          taints:
+            - key: node.cloudprovider.kubernetes.io/uninitialized
+              value: "true"
+              effect: NoSchedule

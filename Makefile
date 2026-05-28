@@ -169,8 +169,10 @@ clusterctl-release: manifests generate kustomize ## Generate clusterctl release 
 	cd "$$tmp_dir/config/manager" && "$(KUSTOMIZE)" edit set image controller=${IMG}; \
 	"$(KUSTOMIZE)" build "$$tmp_dir/config/default" > "$(CURDIR)/$(CLUSTERCTL_RELEASE_DIR)/infrastructure-components.yaml"
 	cp metadata.yaml "$(CLUSTERCTL_RELEASE_DIR)/metadata.yaml"
+	cp templates/clusterclass.yaml "$(CLUSTERCTL_RELEASE_DIR)/clusterclass.yaml"
 	cp templates/cluster-template.yaml "$(CLUSTERCTL_RELEASE_DIR)/cluster-template.yaml"
 	cp templates/cluster-template-development.yaml "$(CLUSTERCTL_RELEASE_DIR)/cluster-template-development.yaml"
+	cp templates/cluster-template-topology.yaml "$(CLUSTERCTL_RELEASE_DIR)/cluster-template-topology.yaml"
 
 ##@ Deployment
 

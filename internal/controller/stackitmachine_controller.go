@@ -132,6 +132,13 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 			metav1.ConditionFalse, "InfrastructureNotReady", "waiting for StackitCluster to be ready", sm.Generation)
 		return ctrl.Result{}, nil
 	}
+	if err := validateMachineAvailabilityZone(s); err != nil {
+		util.SetCondition(&sm.Status.Conditions, infrav1.MachineInstanceReadyCondition,
+			metav1.ConditionFalse, "InvalidFailureDomain", err.Error(), sm.Generation)
+		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
+			metav1.ConditionFalse, "InvalidFailureDomain", err.Error(), sm.Generation)
+		return ctrl.Result{}, nil
+	}
 
 	bootstrapData, condStatus, reason, msg := r.fetchBootstrapData(ctx, s.Machine)
 	util.SetCondition(&sm.Status.Conditions, infrav1.MachineBootstrapReadyCondition, condStatus, reason, msg, sm.Generation)
@@ -198,6 +205,19 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 		metav1.ConditionTrue, "Available", "", sm.Generation)
 	log.V(1).Info("StackitMachine ready", "providerID", providerID)
 	return ctrl.Result{}, nil
+}
+
+func validateMachineAvailabilityZone(s *scope.MachineScope) error {
+	availabilityZone := s.StackitMachine.Spec.AvailabilityZone
+	if availabilityZone == "" || len(s.StackitCluster.Status.FailureDomains) == 0 {
+		return nil
+	}
+	for _, failureDomain := range s.StackitCluster.Status.FailureDomains {
+		if failureDomain.Name == availabilityZone {
+			return nil
+		}
+	}
+	return fmt.Errorf("availabilityZone %q is not published in StackitCluster status.failureDomains", availabilityZone)
 }
 
 func (r *StackitMachineReconciler) reconcileDelete(ctx context.Context, s *scope.MachineScope) (ctrl.Result, error) {

@@ -161,6 +161,13 @@ func (in *StackitClusterStatus) DeepCopyInto(out *StackitClusterStatus) {
 	*out = *in
 	out.Initialization = in.Initialization
 	out.APIServerEndpoint = in.APIServerEndpoint
+	if in.FailureDomains != nil {
+		in, out := &in.FailureDomains, &out.FailureDomains
+		*out = make([]v1beta2.FailureDomain, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))

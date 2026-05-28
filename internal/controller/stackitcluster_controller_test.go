@@ -82,6 +82,11 @@ var _ = Describe("StackitCluster Controller", func() {
 		Expect(got.Status.Ready).To(BeTrue())
 		Expect(got.Status.APIServerEndpoint.Host).To(Equal("198.51.100.1"))
 		Expect(got.Status.APIServerLoadBalancerID).To(BeEmpty())
+		Expect(got.Status.FailureDomains).To(ConsistOf(
+			clusterv1.FailureDomain{Name: "eu01-1", ControlPlane: ptr.To(true), Attributes: map[string]string{"region": "eu01"}},
+			clusterv1.FailureDomain{Name: "eu01-2", ControlPlane: ptr.To(true), Attributes: map[string]string{"region": "eu01"}},
+			clusterv1.FailureDomain{Name: "eu01-3", ControlPlane: ptr.To(true), Attributes: map[string]string{"region": "eu01"}},
+		))
 		Expect(fakeCloud.LoadBalancerCount()).To(Equal(0))
 		expectCondition(got.Status.Conditions, infrav1.ClusterReadyCondition, metav1.ConditionTrue, "Available")
 		expectCondition(got.Status.Conditions, infrav1.ClusterNetworkReadyCondition, metav1.ConditionTrue, "Available")

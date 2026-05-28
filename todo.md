@@ -100,9 +100,9 @@
   - [ ] Exercise automatic MachineDeployment rolling completion once workload-cluster Node availability is enabled.
   - [ ] Exercise KubeadmControlPlane upgrades once workload-cluster bootstrap is enabled.
   - [ ] Verify upgraded Nodes join and the workload cluster remains reachable once bootstrap is enabled.
-- [ ] PR 8: Model STACKIT availability zones as CAPI FailureDomains.
-  - [ ] Publish failureDomains in StackitCluster status.
-  - [ ] Validate StackitMachine availability zones and preserve single-AZ templates.
+- [x] PR 8: Model STACKIT availability zones as CAPI FailureDomains.
+  - [x] Publish failureDomains in StackitCluster status.
+  - [x] Validate StackitMachine availability zones and preserve single-AZ templates.
 - [ ] PR 9: Add ClusterClass support.
   - [ ] Add ClusterClass and topology templates after create/delete, scale, and upgrade flows are stable.
 - [ ] Decide on release/distribution flow: installer YAML, Helm chart, or both.

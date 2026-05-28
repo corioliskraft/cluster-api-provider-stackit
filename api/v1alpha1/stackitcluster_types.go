@@ -104,6 +104,12 @@ type StackitClusterStatus struct {
 	// +optional
 	APIServerLoadBalancerID string `json:"apiServerLoadBalancerID,omitempty"`
 
+	// failureDomains is a list of availability zones available to the cluster.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	FailureDomains []clusterv1.FailureDomain `json:"failureDomains,omitempty"`
+
 	// conditions represent the current state of the StackitCluster resource.
 	// +listType=map
 	// +listMapKey=type

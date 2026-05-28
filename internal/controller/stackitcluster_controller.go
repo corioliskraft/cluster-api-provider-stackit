@@ -110,6 +110,7 @@ func (r *StackitClusterReconciler) reconcileNormal(ctx context.Context, s *scope
 	if !controllerutil.ContainsFinalizer(sc, infrav1.ClusterFinalizer) {
 		controllerutil.AddFinalizer(sc, infrav1.ClusterFinalizer)
 	}
+	sc.Status.FailureDomains = stackitFailureDomains(sc.Spec.Region)
 
 	cloudClient, err := r.buildCloudClient(ctx, sc)
 	if err != nil {
@@ -168,6 +169,33 @@ func (r *StackitClusterReconciler) reconcileNormal(ctx context.Context, s *scope
 		metav1.ConditionTrue, "Available", "", sc.Generation)
 	log.V(1).Info("StackitCluster ready", "endpoint", sc.Status.APIServerEndpoint)
 	return ctrl.Result{}, nil
+}
+
+func stackitFailureDomains(region string) []clusterv1.FailureDomain {
+	controlPlane := true
+	return []clusterv1.FailureDomain{
+		{
+			Name:         region + "-1",
+			ControlPlane: &controlPlane,
+			Attributes: map[string]string{
+				"region": region,
+			},
+		},
+		{
+			Name:         region + "-2",
+			ControlPlane: &controlPlane,
+			Attributes: map[string]string{
+				"region": region,
+			},
+		},
+		{
+			Name:         region + "-3",
+			ControlPlane: &controlPlane,
+			Attributes: map[string]string{
+				"region": region,
+			},
+		},
+	}
 }
 
 func (r *StackitClusterReconciler) reconcileDelete(ctx context.Context, s *scope.ClusterScope) (ctrl.Result, error) {

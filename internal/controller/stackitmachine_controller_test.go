@@ -131,6 +131,25 @@ var _ = Describe("StackitMachine Controller", func() {
 		expectCondition(got.Status.Conditions, infrav1.MachineInstanceReadyCondition, metav1.ConditionTrue, "Available")
 	})
 
+	It("does not create a VM when availabilityZone is outside published failure domains", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Spec.AvailabilityZone = "eu01-9"
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Ready).To(BeFalse())
+		expectCondition(got.Status.Conditions, infrav1.MachineInstanceReadyCondition, metav1.ConditionFalse, "InvalidFailureDomain")
+		expectCondition(got.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionFalse, "InvalidFailureDomain")
+	})
+
 	It("marks credentials invalid without requeueing on unauthorized credentials", func() {
 		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
 		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")

@@ -52,6 +52,10 @@ const metricsRoleBindingName = "cluster-api-provider-stackit-metrics-binding"
 
 const stackitE2EMachineType = "c2i.2"
 
+const defaultKubernetesVersion = "v1.33.0"
+
+const cloudProviderStackitImageRepository = "ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager"
+
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
 
@@ -462,7 +466,8 @@ var _ = Describe("Manager", Ordered, func() {
 			clusterName := fmt.Sprintf("stackit-e2e-noderef-%d", time.Now().Unix())
 			testID := envDefault("STACKIT_E2E_TEST_ID", clusterName)
 			leakTags := stackitE2ETags(testID)
-			kubernetesVersion := envDefault("KUBERNETES_VERSION", "v1.31.0")
+			kubernetesVersion := envDefault("KUBERNETES_VERSION", defaultKubernetesVersion)
+			validateSupportedKubernetesVersion(kubernetesVersion)
 			observedInstanceIDs := []string{}
 
 			By("cleaning up stale STACKIT resources for the e2e test ID")
@@ -508,7 +513,7 @@ var _ = Describe("Manager", Ordered, func() {
 			}, 20*time.Minute, 15*time.Second).Should(Succeed())
 
 			By("installing CNI and cloud-provider-stackit into the workload Cluster")
-			installWorkloadAddons(workloadKubeconfig, clusterName, cfg, stackitCredentialsSecret(ctx, cfg.CredentialsSecretName, cfg.CredentialsSecretNS))
+			installWorkloadAddons(workloadKubeconfig, clusterName, cfg, kubernetesVersion, stackitCredentialsSecret(ctx, cfg.CredentialsSecretName, cfg.CredentialsSecretNS))
 
 			By("waiting for one control-plane and one worker VM to provision")
 			Eventually(func(g Gomega) {
@@ -560,7 +565,9 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(cloud.CleanupByTags(ctx, cloudClient, leakTags)).To(Succeed())
 
 			By("applying a worker MachineDeployment scale fixture")
-			fixture := renderStackitMachineDeploymentScaleFixture(clusterName, testID, cfg, envDefault("KUBERNETES_VERSION", "v1.34.0"))
+			kubernetesVersion := envDefault("KUBERNETES_VERSION", defaultKubernetesVersion)
+			validateSupportedKubernetesVersion(kubernetesVersion)
+			fixture := renderStackitMachineDeploymentScaleFixture(clusterName, testID, cfg, kubernetesVersion)
 			fixturePath := writeTempManifest("stackit-md-scale-e2e-*.yaml", fixture)
 			defer func() {
 				cleanupStackitMachineDeploymentScaleFixture(clusterName, cfg.Namespace)
@@ -681,8 +688,10 @@ var _ = Describe("Manager", Ordered, func() {
 			testID := envDefault("STACKIT_E2E_TEST_ID", clusterName)
 			leakTags := stackitE2ETags(testID)
 			machineDeploymentName := clusterName + "-md-0"
-			upgradeFrom := envDefault("STACKIT_E2E_UPGRADE_FROM", "v1.31.0")
-			upgradeTo := envDefault("STACKIT_E2E_UPGRADE_TO", "v1.32.0")
+			upgradeFrom := envDefault("STACKIT_E2E_UPGRADE_FROM", defaultKubernetesVersion)
+			upgradeTo := envDefault("STACKIT_E2E_UPGRADE_TO", "v1.34.0")
+			validateSupportedKubernetesVersion(upgradeFrom)
+			validateSupportedKubernetesVersion(upgradeTo)
 			observedInstanceIDs := []string{}
 
 			By("cleaning up stale STACKIT resources for the e2e test ID")
@@ -1490,9 +1499,55 @@ func kubernetesAptRepoMinor(kubernetesVersion string) string {
 	version := strings.TrimPrefix(kubernetesVersion, "v")
 	parts := strings.Split(version, ".")
 	if len(parts) < 2 {
-		return "v1.31"
+		return strings.TrimSuffix(defaultKubernetesVersion, ".0")
 	}
 	return "v" + parts[0] + "." + parts[1]
+}
+
+func validateSupportedKubernetesVersion(kubernetesVersion string) {
+	minor, ok := kubernetesMinor(kubernetesVersion)
+	Expect(ok).To(BeTrue(), "Kubernetes version %q must use v<major>.<minor>.<patch> format", kubernetesVersion)
+	Expect(supportedKubernetesMinor(minor)).To(BeTrue(), "Kubernetes minor %s is unsupported; supported minors are v1.33.x, v1.34.x, v1.35.x, and v1.36.x", minor)
+}
+
+func cloudProviderStackitImageForKubernetesVersion(kubernetesVersion string) string {
+	minor, ok := kubernetesMinor(kubernetesVersion)
+	Expect(ok).To(BeTrue(), "Kubernetes version %q must use v<major>.<minor>.<patch> format", kubernetesVersion)
+	image := envDefault("STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE", fmt.Sprintf("%s:v%s.0", cloudProviderStackitImageRepository, minor))
+	imageMinor, ok := imageKubernetesMinor(image)
+	Expect(ok).To(BeTrue(), "cloud-provider-stackit image %q must include a v<major>.<minor>.<patch> tag", image)
+	Expect(imageMinor).To(Equal(minor), "cloud-provider-stackit image minor must match Kubernetes minor")
+	return image
+}
+
+func kubernetesMinor(version string) (string, bool) {
+	version = strings.TrimPrefix(version, "v")
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+	return parts[0] + "." + parts[1], true
+}
+
+func imageKubernetesMinor(image string) (string, bool) {
+	tagStart := strings.LastIndex(image, ":")
+	if tagStart == -1 || tagStart == len(image)-1 {
+		return "", false
+	}
+	tag := image[tagStart+1:]
+	if digestStart := strings.Index(tag, "@"); digestStart != -1 {
+		tag = tag[:digestStart]
+	}
+	return kubernetesMinor(tag)
+}
+
+func supportedKubernetesMinor(minor string) bool {
+	switch minor {
+	case "1.33", "1.34", "1.35", "1.36":
+		return true
+	default:
+		return false
+	}
 }
 
 func kubeadmPackageInstallCommands(kubernetesRepoMinor string) string {
@@ -1705,13 +1760,13 @@ func kubectlOutputWithKubeconfig(g Gomega, kubeconfig string, args ...string) st
 	return strings.TrimSpace(output)
 }
 
-func installWorkloadAddons(kubeconfig, clusterName string, cfg stackitVMConfig, credentials map[string][]byte) {
+func installWorkloadAddons(kubeconfig, clusterName string, cfg stackitVMConfig, kubernetesVersion string, credentials map[string][]byte) {
 	installWorkloadCNI(kubeconfig)
 
 	By("rendering cloud-provider-stackit addon")
 	serviceAccountJSON, ok := credentials["serviceaccount.json"]
 	Expect(ok).To(BeTrue(), "credentials Secret is missing serviceaccount.json")
-	addon := renderCloudProviderStackitAddon(clusterName, cfg, serviceAccountJSON)
+	addon := renderCloudProviderStackitAddon(clusterName, cfg, kubernetesVersion, serviceAccountJSON)
 	addonPath := writeTempManifest("stackit-ccm-addon-*.yaml", addon)
 	defer func() {
 		_ = os.Remove(addonPath)
@@ -1782,7 +1837,7 @@ func installManifestCNI(kubeconfig, name, manifest string) {
 	Expect(err).NotTo(HaveOccurred(), "Failed to install %s from %s", name, manifest)
 }
 
-func renderCloudProviderStackitAddon(clusterName string, cfg stackitVMConfig, serviceAccountJSON []byte) string {
+func renderCloudProviderStackitAddon(clusterName string, cfg stackitVMConfig, kubernetesVersion string, serviceAccountJSON []byte) string {
 	addonBytes, err := os.ReadFile("templates/addons/cloud-provider-stackit.yaml")
 	Expect(err).NotTo(HaveOccurred(), "Failed to read cloud-provider-stackit addon template")
 	replacer := strings.NewReplacer(
@@ -1791,8 +1846,8 @@ func renderCloudProviderStackitAddon(clusterName string, cfg stackitVMConfig, se
 		"${STACKIT_REGION}", cfg.Region,
 		"${STACKIT_NETWORK_ID}", cfg.NetworkID,
 		"${STACKIT_SERVICE_ACCOUNT_JSON_B64}", base64.StdEncoding.EncodeToString(serviceAccountJSON),
-		"${STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE:=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.31.11}",
-		envDefault("STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE", "ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.31.11"),
+		"${STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE}",
+		cloudProviderStackitImageForKubernetesVersion(kubernetesVersion),
 	)
 	return replacer.Replace(string(addonBytes))
 }

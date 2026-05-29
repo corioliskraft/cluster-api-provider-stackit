@@ -152,7 +152,7 @@ spec:
           operator: Exists
       containers:
         - name: stackit-cloud-controller-manager
-          image: ${STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE:=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.31.11}
+          image: ${STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE}
           args:
             - --cloud-provider=stackit
             - --webhook-secure-port=0

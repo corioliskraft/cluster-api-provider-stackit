@@ -5,8 +5,8 @@ The current development phase is organized into small PR-sized changes:
 | PR | Topic | Status |
 | --- | --- | --- |
 | PR 1 | Cluster API contract audit and fixes | done |
-| PR 2 | ProviderID compatibility | partially verified |
-| PR 3 | `cloud-provider-stackit` addon | manifest present, readiness pending |
+| PR 2 | ProviderID compatibility | real NodeRef alignment verified |
+| PR 3 | `cloud-provider-stackit` addon | embedded in default template |
 | PR 4 | create/delete e2e and cleanup | core flow implemented |
 | PR 5 | clusterctl release packaging | done |
 | PR 6 | worker scale e2e | infrastructure-level flow done |

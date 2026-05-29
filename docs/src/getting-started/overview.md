@@ -41,14 +41,11 @@ an optional API server load balancer. The remaining gaps are mostly around
 workload-cluster readiness, cloud-provider integration, release/distribution,
 and Cluster API contract details.
 
-- Workload-cluster readiness is still open. The full workload-cluster e2e path
-  and Node readiness with `cloud-provider-stackit` are still pending.
-- The cloud controller manager is not part of the default cluster template.
-  `templates/cluster-template.yaml` sets `cloud-provider=external`, but it does
-  not install `cloud-provider-stackit`. Without the CCM, Nodes can remain
-  uninitialized and `Node.spec.providerID` / CAPI `NodeRef` alignment can be
-  missing. A separate addon manifest exists in
-  `templates/addons/cloud-provider-stackit.yaml`.
+- Workload-cluster readiness is covered by the NodeRef e2e path for 1
+  control-plane / 1 worker clusters. The default cluster template installs
+  `cloud-provider-stackit` through a Cluster API `ClusterResourceSet`, and the
+  NodeRef e2e verifies `StackitMachine`, CAPI `Machine`, and workload `Node`
+  provider ID alignment.
 - The release story is not finalized. Local `clusterctl` assets can be
   generated, but the final distribution path is still open. Production use
   needs versioned images, published `clusterctl` assets, upgrade guidance,
@@ -88,10 +85,10 @@ For full Cluster API support, the provider should complete the following areas:
   `StackitMachineTemplate` exist, but the template resources should support
   template metadata for labels and annotations. Full create/ready/delete e2e
   coverage for topology clusters is still required.
-- Provide a tested addon flow for `cloud-provider-stackit` and the CNI. Either
-  the provider should ship a `clusterctl`-friendly addon template, or the docs
-  should define a tested post-create installation path that reliably clears the
-  external cloud-provider node taint and aligns provider IDs.
+- Keep the `cloud-provider-stackit` integration aligned with Kubernetes minor
+  versions. Supported workload cluster minors are currently v1.33.x through
+  v1.36.x, and the cloud-provider image minor must match the workload cluster
+  Kubernetes minor.
 - Harden scale, upgrade, remediation, and deletion behavior. Worker scale and
   replacement upgrade coverage exists, but full support should include control
   plane replacement, MachineHealthCheck remediation, interrupted deletes,

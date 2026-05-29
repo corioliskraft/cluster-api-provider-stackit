@@ -3,7 +3,7 @@
 Create the workload cluster with the source version:
 
 ```sh
-export KUBERNETES_VERSION=v1.31.0
+export KUBERNETES_VERSION=v1.33.0
 clusterctl generate cluster "${CLUSTER_NAME}" \
   --from templates/cluster-template.yaml \
   > "${CLUSTER_NAME}.yaml"
@@ -16,7 +16,7 @@ Upgrade the control plane first:
 kubectl patch kubeadmcontrolplane "${CLUSTER_NAME}-control-plane" \
   -n "${NAMESPACE}" \
   --type merge \
-  -p '{"spec":{"version":"v1.32.0"}}'
+  -p '{"spec":{"version":"v1.34.0"}}'
 ```
 
 Then upgrade the workers:
@@ -25,7 +25,7 @@ Then upgrade the workers:
 kubectl patch machinedeployment "${CLUSTER_NAME}-md-0" \
   -n "${NAMESPACE}" \
   --type merge \
-  -p '{"spec":{"template":{"spec":{"version":"v1.32.0"}}}}'
+  -p '{"spec":{"template":{"spec":{"version":"v1.34.0"}}}}'
 ```
 
 Watch rollout state:

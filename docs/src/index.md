@@ -31,7 +31,8 @@ Working areas:
 
 Known gaps:
 
-- Workload-cluster Node readiness depends on finishing the
-  `cloud-provider-stackit` addon flow.
+- Full workload-cluster Node readiness is covered for the 1 control-plane / 1
+  worker NodeRef e2e path, but broader scale, upgrade, and ClusterClass
+  readiness coverage is still pending.
 - Full ClusterClass create/ready/delete e2e is still pending.
 - Release distribution is not finalized between installer YAML, Helm, or both.

@@ -89,11 +89,29 @@ export STACKIT_IMAGE_ID=3ad2867e-695b-4ee6-9502-b563013413d4 # non-ARM Ubuntu 22
 export STACKIT_MACHINE_TYPE=c2i.2
 export STACKIT_SSH_KEY_NAME=<ssh-key-name>
 export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
+export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < ./sa/serviceaccount.json | tr -d '\n')"
+export STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.34.0
+
+hack/validate-stackit-versions.sh
 
 clusterctl generate cluster "$CLUSTER_NAME" \
   --from templates/cluster-template.yaml \
   > "${CLUSTER_NAME}.yaml"
 ```
+
+The default template embeds `cloud-provider-stackit` through a Cluster API
+`ClusterResourceSet`. The cloud-provider image minor must match the Kubernetes
+minor:
+
+| Kubernetes version | Required `cloud-provider-stackit` image minor |
+| --- | --- |
+| `v1.33.x` | `v1.33.x` |
+| `v1.34.x` | `v1.34.x` |
+| `v1.35.x` | `v1.35.x` |
+| `v1.36.x` | `v1.36.x` |
+
+`clusterctl init` must run with the `ClusterResourceSet` feature enabled. The
+local `hack/clusterctl-local.yaml` sets `CLUSTER_RESOURCE_SET=true`.
 
 Apply the rendered manifest to a management cluster with Cluster API and this provider installed:
 
@@ -244,7 +262,7 @@ clusterctl init --config hack/clusterctl-local.yaml --infrastructure stackit:v0.
 clusterctl generate cluster stackit-test \
   --config hack/clusterctl-local.yaml \
   --infrastructure stackit:v0.1.0 \
-  --kubernetes-version v1.31.0 \
+  --kubernetes-version v1.33.0 \
   --control-plane-machine-count 1 \
   --worker-machine-count 1
 ```

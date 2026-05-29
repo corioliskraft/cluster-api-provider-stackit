@@ -6,7 +6,7 @@ Common clusterctl variables:
 | --- | --- |
 | `CLUSTER_NAME` | Workload Cluster name |
 | `NAMESPACE` | Namespace for Cluster API resources |
-| `KUBERNETES_VERSION` | Kubernetes version, for example `v1.31.0` |
+| `KUBERNETES_VERSION` | Kubernetes version, for example `v1.33.0`. Supported workload cluster minors are v1.33.x through v1.36.x |
 | `CONTROL_PLANE_MACHINE_COUNT` | Control-plane replica count |
 | `WORKER_MACHINE_COUNT` | Worker replica count |
 | `STACKIT_PROJECT_ID` | STACKIT project UUID |
@@ -16,6 +16,8 @@ Common clusterctl variables:
 | `STACKIT_MACHINE_TYPE` | STACKIT machine type |
 | `STACKIT_SSH_KEY_NAME` | Optional existing SSH key name |
 | `STACKIT_CREDENTIALS_SECRET_NAME` | Kubernetes Secret with STACKIT credentials |
+| `STACKIT_SERVICE_ACCOUNT_JSON_B64` | Base64-encoded STACKIT service account JSON for the workload-cluster cloud controller manager Secret |
+| `STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE` | `cloud-provider-stackit` image. The image tag minor must match `KUBERNETES_VERSION` |
 | `CLUSTER_CLASS_NAMESPACE` | Namespace containing the ClusterClass |
 
 Development template variables may also include:

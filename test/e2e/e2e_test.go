@@ -52,9 +52,16 @@ const metricsRoleBindingName = "cluster-api-provider-stackit-metrics-binding"
 
 const stackitE2EMachineType = "c2i.2"
 
-const defaultKubernetesVersion = "v1.33.0"
+const defaultKubernetesVersion = "v1.33.12"
 
 const cloudProviderStackitImageRepository = "ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager"
+
+var defaultCloudProviderStackitImages = map[string]string{
+	"1.33": cloudProviderStackitImageRepository + ":v1.33.12",
+	"1.34": cloudProviderStackitImageRepository + ":v1.34.8",
+	"1.35": cloudProviderStackitImageRepository + ":v1.35.3",
+	"1.36": cloudProviderStackitImageRepository + ":v1.36.0",
+}
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -695,7 +702,7 @@ var _ = Describe("Manager", Ordered, func() {
 			leakTags := stackitE2ETags(testID)
 			machineDeploymentName := clusterName + "-md-0"
 			upgradeFrom := envDefault("STACKIT_E2E_UPGRADE_FROM", defaultKubernetesVersion)
-			upgradeTo := envDefault("STACKIT_E2E_UPGRADE_TO", "v1.34.0")
+			upgradeTo := envDefault("STACKIT_E2E_UPGRADE_TO", "v1.34.8")
 			validateSupportedKubernetesVersion(upgradeFrom)
 			validateSupportedKubernetesVersion(upgradeTo)
 			observedInstanceIDs := []string{}
@@ -1546,7 +1553,9 @@ func validateSupportedKubernetesVersion(kubernetesVersion string) {
 func cloudProviderStackitImageForKubernetesVersion(kubernetesVersion string) string {
 	minor, ok := kubernetesMinor(kubernetesVersion)
 	Expect(ok).To(BeTrue(), "Kubernetes version %q must use v<major>.<minor>.<patch> format", kubernetesVersion)
-	image := envDefault("STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE", fmt.Sprintf("%s:v%s.0", cloudProviderStackitImageRepository, minor))
+	defaultImage, ok := defaultCloudProviderStackitImages[minor]
+	Expect(ok).To(BeTrue(), "no default cloud-provider-stackit image configured for Kubernetes minor %s", minor)
+	image := envDefault("STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE", defaultImage)
 	imageMinor, ok := imageKubernetesMinor(image)
 	Expect(ok).To(BeTrue(), "cloud-provider-stackit image %q must include a v<major>.<minor>.<patch> tag", image)
 	Expect(imageMinor).To(Equal(minor), "cloud-provider-stackit image minor must match Kubernetes minor")

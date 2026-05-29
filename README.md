@@ -79,7 +79,7 @@ Example:
 ```sh
 export CLUSTER_NAME=capi-stackit
 export NAMESPACE=default
-export KUBERNETES_VERSION=v1.34.0
+export KUBERNETES_VERSION=v1.34.8
 export CONTROL_PLANE_MACHINE_COUNT=1
 export WORKER_MACHINE_COUNT=1
 export STACKIT_PROJECT_ID=4cf9e1f0-1f18-4c5b-bcc5-fbd3dd6675a5
@@ -90,7 +90,7 @@ export STACKIT_MACHINE_TYPE=c2i.2
 export STACKIT_SSH_KEY_NAME=<ssh-key-name>
 export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
 export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < ./sa/serviceaccount.json | tr -d '\n')"
-export STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.34.0
+export STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.34.8
 
 hack/validate-stackit-versions.sh
 
@@ -109,6 +109,11 @@ minor:
 | `v1.34.x` | `v1.34.x` |
 | `v1.35.x` | `v1.35.x` |
 | `v1.36.x` | `v1.36.x` |
+
+Use the latest Kubernetes patch release for the selected minor. The e2e
+defaults use `v1.33.12`, `v1.34.8`, `v1.35.5`, and `v1.36.1` as currently
+published by Kubernetes, while the embedded CCM defaults use the latest
+verified `cloud-provider-stackit` image tag for the same minor.
 
 `clusterctl init` must run with the `ClusterResourceSet` feature enabled. The
 local `hack/clusterctl-local.yaml` sets `CLUSTER_RESOURCE_SET=true`.
@@ -262,7 +267,7 @@ clusterctl init --config hack/clusterctl-local.yaml --infrastructure stackit:v0.
 clusterctl generate cluster stackit-test \
   --config hack/clusterctl-local.yaml \
   --infrastructure stackit:v0.1.0 \
-  --kubernetes-version v1.33.0 \
+  --kubernetes-version v1.33.12 \
   --control-plane-machine-count 1 \
   --worker-machine-count 1
 ```

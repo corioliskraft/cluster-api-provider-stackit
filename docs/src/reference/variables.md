@@ -6,7 +6,7 @@ Common clusterctl variables:
 | --- | --- |
 | `CLUSTER_NAME` | Workload Cluster name |
 | `NAMESPACE` | Namespace for Cluster API resources |
-| `KUBERNETES_VERSION` | Kubernetes version, for example `v1.33.0`. Supported workload cluster minors are v1.33.x through v1.36.x |
+| `KUBERNETES_VERSION` | Kubernetes version, for example `v1.33.12`. Supported workload cluster minors are v1.33.x through v1.36.x; use the latest patch release for the selected minor |
 | `CONTROL_PLANE_MACHINE_COUNT` | Control-plane replica count |
 | `WORKER_MACHINE_COUNT` | Worker replica count |
 | `STACKIT_PROJECT_ID` | STACKIT project UUID |

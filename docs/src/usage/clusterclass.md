@@ -28,7 +28,7 @@ Render and apply a topology Cluster:
 ```sh
 clusterctl generate cluster "${CLUSTER_NAME}" \
   --from templates/cluster-template-topology.yaml \
-  --kubernetes-version v1.33.0 \
+  --kubernetes-version v1.33.12 \
   --control-plane-machine-count 1 \
   --worker-machine-count 1 \
   > "${CLUSTER_NAME}-topology.yaml"

@@ -110,6 +110,7 @@ func setupCertManager() {
 func setupClusterAPI() {
 	By("installing Cluster API providers")
 	cmd := exec.Command("clusterctl", "init", "--core", "cluster-api", "--bootstrap", "kubeadm", "--control-plane", "kubeadm")
+	cmd.Env = append(os.Environ(), "CLUSTER_RESOURCE_SET=true")
 	_, err := utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install Cluster API providers")
 

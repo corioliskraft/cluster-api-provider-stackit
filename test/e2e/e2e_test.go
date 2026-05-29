@@ -463,6 +463,9 @@ var _ = Describe("Manager", Ordered, func() {
 			cfg := stackitVMConfigFromEnv()
 			ctx := context.Background()
 			cloudClient := stackitCloudClientFromCredentialsSecret(ctx, cfg)
+			credentials := stackitCredentialsSecret(ctx, cfg.CredentialsSecretName, cfg.CredentialsSecretNS)
+			serviceAccountJSON, ok := credentials["serviceaccount.json"]
+			Expect(ok).To(BeTrue(), "credentials Secret is missing serviceaccount.json")
 			clusterName := fmt.Sprintf("stackit-e2e-noderef-%d", time.Now().Unix())
 			testID := envDefault("STACKIT_E2E_TEST_ID", clusterName)
 			leakTags := stackitE2ETags(testID)
@@ -474,7 +477,7 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(cloud.CleanupByTags(ctx, cloudClient, leakTags)).To(Succeed())
 
 			By("applying a real kubeadm workload Cluster fixture")
-			fixture := renderStackitKubeadmClusterFixture(clusterName, testID, cfg, kubernetesVersion)
+			fixture := renderStackitKubeadmClusterFixture(clusterName, testID, cfg, kubernetesVersion, serviceAccountJSON)
 			fixturePath := writeTempManifest("stackit-noderef-e2e-*.yaml", fixture)
 			var workloadKubeconfig string
 			defer func() {
@@ -512,8 +515,11 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(output).To(Equal("namespace/kube-system"))
 			}, 20*time.Minute, 15*time.Second).Should(Succeed())
 
-			By("installing CNI and cloud-provider-stackit into the workload Cluster")
-			installWorkloadAddons(workloadKubeconfig, clusterName, cfg, kubernetesVersion, stackitCredentialsSecret(ctx, cfg.CredentialsSecretName, cfg.CredentialsSecretNS))
+			By("installing CNI into the workload Cluster")
+			installWorkloadCNI(workloadKubeconfig)
+
+			By("waiting for embedded cloud-provider-stackit rollout")
+			waitForWorkloadCCMRollout(workloadKubeconfig)
 
 			By("waiting for one control-plane and one worker VM to provision")
 			Eventually(func(g Gomega) {
@@ -1263,7 +1269,7 @@ spec:
 		cfg.RootVolumePerformance, securityGroups, kubernetesVersion)
 }
 
-func renderStackitKubeadmClusterFixture(clusterName, testID string, cfg stackitVMConfig, kubernetesVersion string) string {
+func renderStackitKubeadmClusterFixture(clusterName, testID string, cfg stackitVMConfig, kubernetesVersion string, serviceAccountJSON []byte) string {
 	securityGroups := ""
 	for _, securityGroupID := range cfg.SecurityGroupIDs {
 		securityGroups += fmt.Sprintf("\n        - %s", securityGroupID)
@@ -1279,6 +1285,7 @@ func renderStackitKubeadmClusterFixture(clusterName, testID string, cfg stackitV
 	kubernetesRepoMinor := kubernetesAptRepoMinor(kubernetesVersion)
 	controlPlanePreKubeadmCommands := indentBlock(kubeadmPackageInstallCommands(kubernetesRepoMinor), 6)
 	workerPreKubeadmCommands := indentBlock(kubeadmPackageInstallCommands(kubernetesRepoMinor), 8)
+	cloudProviderStackitAddon := indentBlock(renderCloudProviderStackitAddon(clusterName, cfg, kubernetesVersion, serviceAccountJSON), 4)
 
 	return fmt.Sprintf(`apiVersion: cluster.x-k8s.io/v1beta2
 kind: Cluster
@@ -1288,6 +1295,7 @@ metadata:
   labels:
     cluster-api-provider-stackit/e2e: "true"
     cluster-api-provider-stackit/test-id: "%[2]s"
+    cluster-api-provider-stackit/cloud-provider-stackit: "true"
 spec:
   clusterNetwork:
     pods:
@@ -1490,9 +1498,34 @@ spec:
           kubeletExtraArgs:
             - name: cloud-provider
               value: external
+---
+apiVersion: addons.cluster.x-k8s.io/v1beta2
+kind: ClusterResourceSet
+metadata:
+  name: %[1]s-cloud-provider-stackit
+  namespace: %[3]s
+spec:
+  strategy: Reconcile
+  clusterSelector:
+    matchLabels:
+      cluster-api-provider-stackit/cloud-provider-stackit: "true"
+  resources:
+    - kind: Secret
+      name: %[1]s-cloud-provider-stackit
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: %[1]s-cloud-provider-stackit
+  namespace: %[3]s
+type: addons.cluster.x-k8s.io/resource-set
+stringData:
+  cloud-provider-stackit.yaml: |
+%[19]s
 `, clusterName, testID, cfg.Namespace, cfg.ProjectID, cfg.Region, cfg.CredentialsSecretName, cfg.CredentialsSecretNS,
 		cfg.NetworkID, cfg.ImageID, cfg.MachineType, cfg.AvailabilityZone, sshKeyName, cfg.RootVolumeSizeGiB,
-		cfg.RootVolumePerformance, securityGroups, kubernetesVersion, controlPlanePreKubeadmCommands, workerPreKubeadmCommands)
+		cfg.RootVolumePerformance, securityGroups, kubernetesVersion, controlPlanePreKubeadmCommands, workerPreKubeadmCommands,
+		cloudProviderStackitAddon)
 }
 
 func kubernetesAptRepoMinor(kubernetesVersion string) string {
@@ -1632,9 +1665,11 @@ func cleanupStackitKubeadmClusterFixture(clusterName, namespace string) {
 		{"delete", "machine", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name=" + clusterName, "--ignore-not-found", "--wait=true", "--timeout=20m"},
 		{"delete", "stackitmachine", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name=" + clusterName, "--ignore-not-found", "--wait=true", "--timeout=20m"},
 		{"delete", "stackitcluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=10m"},
+		{"delete", "clusterresourceset", clusterName + "-cloud-provider-stackit", "-n", namespace, "--ignore-not-found"},
 		{"delete", "stackitmachinetemplate", clusterName + "-control-plane", "-n", namespace, "--ignore-not-found"},
 		{"delete", "stackitmachinetemplate", clusterName + "-md-0", "-n", namespace, "--ignore-not-found"},
 		{"delete", "kubeadmconfigtemplate", clusterName + "-md-0", "-n", namespace, "--ignore-not-found"},
+		{"delete", "secret", clusterName + "-cloud-provider-stackit", "-n", namespace, "--ignore-not-found"},
 		{"delete", "secret", clusterName + "-kubeconfig", "-n", namespace, "--ignore-not-found"},
 	} {
 		cmd := exec.Command("kubectl", args...)
@@ -1760,28 +1795,11 @@ func kubectlOutputWithKubeconfig(g Gomega, kubeconfig string, args ...string) st
 	return strings.TrimSpace(output)
 }
 
-func installWorkloadAddons(kubeconfig, clusterName string, cfg stackitVMConfig, kubernetesVersion string, credentials map[string][]byte) {
-	installWorkloadCNI(kubeconfig)
-
-	By("rendering cloud-provider-stackit addon")
-	serviceAccountJSON, ok := credentials["serviceaccount.json"]
-	Expect(ok).To(BeTrue(), "credentials Secret is missing serviceaccount.json")
-	addon := renderCloudProviderStackitAddon(clusterName, cfg, kubernetesVersion, serviceAccountJSON)
-	addonPath := writeTempManifest("stackit-ccm-addon-*.yaml", addon)
-	defer func() {
-		_ = os.Remove(addonPath)
-	}()
-
-	By("installing cloud-provider-stackit addon")
-	cmd := exec.Command("kubectl", "--kubeconfig", kubeconfig, "apply", "-f", addonPath)
-	_, err := utils.Run(cmd)
-	Expect(err).NotTo(HaveOccurred(), "Failed to install cloud-provider-stackit addon")
-
-	By("waiting for cloud-provider-stackit rollout")
-	cmd = exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", "kube-system", "rollout", "status",
+func waitForWorkloadCCMRollout(kubeconfig string) {
+	cmd := exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", "kube-system", "rollout", "status",
 		"deployment/stackit-cloud-controller-manager", "--timeout=5m")
-	_, err = utils.Run(cmd)
-	Expect(err).NotTo(HaveOccurred(), "cloud-provider-stackit did not roll out")
+	_, err := utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "embedded cloud-provider-stackit did not roll out")
 }
 
 func installWorkloadCNI(kubeconfig string) {

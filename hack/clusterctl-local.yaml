@@ -1,4 +1,5 @@
 CLUSTER_TOPOLOGY: "true"
+CLUSTER_RESOURCE_SET: "true"
 
 providers:
   - name: stackit

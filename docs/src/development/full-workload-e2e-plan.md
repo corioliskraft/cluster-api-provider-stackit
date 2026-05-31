@@ -509,3 +509,14 @@ Acceptance criteria:
 - A developer can run any scenario independently with one documented command.
 - Docs do not imply infra-only coverage proves workload Node readiness.
 - The roadmap reflects completed and remaining e2e scope accurately.
+- The documented make targets include at least one required billable validation
+  run before this milestone is marked complete.
+
+Required billable validation:
+
+```sh
+env KUBERNETES_VERSION=v1.35.3 \
+  STACKIT_E2E_CNI=cilium \
+  STACKIT_E2E_TEST_ID=stackit-e2e-docs-$(date +%s) \
+  make test-e2e-workload-noderef
+```

@@ -7,6 +7,7 @@
 - [Overview](getting-started/overview.md)
 - [Prerequisites](getting-started/prerequisites.md)
 - [Credentials](getting-started/credentials.md)
+- [STACKIT Cloud Resources](getting-started/cloud-resources.md)
 - [Management Cluster](getting-started/management-cluster.md)
 
 # Usage

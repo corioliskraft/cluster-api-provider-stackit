@@ -20,7 +20,9 @@ Required STACKIT inputs:
 - Optional security group IDs
 
 The provider currently expects existing infrastructure inputs. It does not
-create networks, security groups, SSH keys, or images.
+create networks, security groups, SSH keys, or images. See
+[STACKIT Cloud Resources](cloud-resources.md) for the required properties of
+those inputs.
 
 Validated development values used during previous local e2e runs included region
 `eu01`, a non-ARM Ubuntu 22.04 image, and small `c2i` machine types.

@@ -14,7 +14,7 @@ Common clusterctl variables:
 | `STACKIT_NETWORK_ID` | Existing STACKIT network UUID |
 | `STACKIT_IMAGE_ID` | Node image UUID |
 | `STACKIT_MACHINE_TYPE` | STACKIT machine type |
-| `STACKIT_SSH_KEY_NAME` | Optional existing SSH key name |
+| `STACKIT_SSH_KEY_NAME` | Optional existing SSH key name. Leave empty when SSH access is not required; SSH is not used for Cluster API bootstrap |
 | `STACKIT_CREDENTIALS_SECRET_NAME` | Kubernetes Secret with STACKIT credentials |
 | `STACKIT_SERVICE_ACCOUNT_JSON_B64` | Base64-encoded STACKIT service account JSON for the workload-cluster cloud controller manager Secret |
 | `STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE` | `cloud-provider-stackit` image. The image tag minor must match `KUBERNETES_VERSION` |

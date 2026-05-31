@@ -35,6 +35,6 @@ spec:
       - name: stackitMachineType
         value: ${STACKIT_MACHINE_TYPE}
       - name: stackitSSHKeyName
-        value: ${STACKIT_SSH_KEY_NAME}
+        value: "${STACKIT_SSH_KEY_NAME}"
       - name: stackitCredentialsSecretName
         value: ${STACKIT_CREDENTIALS_SECRET_NAME}

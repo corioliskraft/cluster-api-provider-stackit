@@ -87,7 +87,7 @@ spec:
     spec:
       imageID: ${STACKIT_IMAGE_ID}
       machineType: ${STACKIT_MACHINE_TYPE}
-      sshKeyName: ${STACKIT_SSH_KEY_NAME}
+      sshKeyName: "${STACKIT_SSH_KEY_NAME}"
       rootVolume:
         sizeGiB: 50
         performanceClass: storage_premium_perf6
@@ -135,7 +135,7 @@ spec:
     spec:
       imageID: ${STACKIT_IMAGE_ID}
       machineType: ${STACKIT_MACHINE_TYPE}
-      sshKeyName: ${STACKIT_SSH_KEY_NAME}
+      sshKeyName: "${STACKIT_SSH_KEY_NAME}"
       rootVolume:
         sizeGiB: 50
         performanceClass: storage_premium_perf6

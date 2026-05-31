@@ -275,7 +275,7 @@ spec:
     spec:
       imageID: 00000000-0000-0000-0000-000000000000
       machineType: c2i.2
-      sshKeyName: stackit
+      sshKeyName: ""
       rootVolume:
         sizeGiB: 50
         performanceClass: storage_premium_perf6
@@ -292,7 +292,7 @@ spec:
     spec:
       imageID: 00000000-0000-0000-0000-000000000000
       machineType: c2i.2
-      sshKeyName: stackit
+      sshKeyName: ""
       rootVolume:
         sizeGiB: 50
         performanceClass: storage_premium_perf6

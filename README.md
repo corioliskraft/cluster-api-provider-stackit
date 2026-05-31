@@ -56,7 +56,7 @@ Required values:
 - `STACKIT_IMAGE_ID`: image UUID for the node operating system
 - `STACKIT_MACHINE_TYPE`: STACKIT machine type, for example `c2i.2`
 - `STACKIT_AVAILABILITY_ZONE`: zone, for example `eu01-1`
-- `STACKIT_SSH_KEY_NAME`: existing STACKIT SSH key name, if SSH access is desired
+- `STACKIT_SSH_KEY_NAME`: optional existing STACKIT SSH key name, only if SSH access is desired
 - `STACKIT_SECURITY_GROUP_ID`: security group UUID applied to created machines
 
 Network and security group prerequisites:
@@ -87,7 +87,7 @@ export STACKIT_REGION=eu01
 export STACKIT_NETWORK_ID=3a87ac2f-8297-4dea-a9da-11d3c19e45fe
 export STACKIT_IMAGE_ID=3ad2867e-695b-4ee6-9502-b563013413d4 # non-ARM Ubuntu 22.04 in eu01
 export STACKIT_MACHINE_TYPE=c2i.2
-export STACKIT_SSH_KEY_NAME=<ssh-key-name>
+export STACKIT_SSH_KEY_NAME= # optional; leave empty when SSH access is not required
 export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
 export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < ./sa/serviceaccount.json | tr -d '\n')"
 export STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.34.8
@@ -229,7 +229,7 @@ go test -tags=e2e ./test/e2e -v -ginkgo.v \
 Optional VM e2e inputs:
 
 - `STACKIT_E2E_NAMESPACE`: namespace for test resources, defaults to `default`
-- `STACKIT_SSH_KEY_NAME`: existing SSH key name
+- `STACKIT_SSH_KEY_NAME`: optional existing SSH key name
 - `STACKIT_SECURITY_GROUP_IDS`: comma-separated security group UUIDs
 - `STACKIT_ROOT_VOLUME_SIZE_GIB`: defaults to `50`
 - `STACKIT_ROOT_VOLUME_PERFORMANCE_CLASS`: defaults to `storage_premium_perf6`

@@ -126,8 +126,8 @@ SSH key pair by name.
 
 SSH is not used for Cluster API bootstrap. Kubeadm bootstrap data is generated
 by CABPK, stored in a Kubernetes Secret, and sent to STACKIT as cloud-init user
-data when each server is created. Leave `sshKeyName` empty when SSH access is
-not required.
+data when each server is created. Leave `sshKeyName` and
+`STACKIT_SSH_KEY_NAME` empty when SSH access is not required.
 
 Import an existing SSH public key:
 
@@ -141,6 +141,10 @@ stackit key-pair create \
   --public-key "@${HOME}/.ssh/id_ed25519.pub" \
   --labels cluster-api-provider-stackit=true
 ```
+
+Only create and pass a key pair when operators need SSH for debugging. Opening
+SSH access also requires an explicit security group rule; the provider does not
+need SSH to create or join Nodes.
 
 Delete a test key pair:
 

@@ -379,15 +379,17 @@ Acceptance criteria:
   workload kubeconfig for all Node assertions.
 - The scenario can be executed independently from scale and control-plane
   upgrade tests.
+- The billable real-cloud validation below passes before the milestone is
+  marked complete.
 
-Suggested command:
+Required billable validation:
 
 ```sh
 env STACKIT_E2E_UPGRADE_WORKLOAD_WORKERS=true \
   STACKIT_E2E_UPGRADE_FROM=v1.35.3 \
   STACKIT_E2E_UPGRADE_TO=v1.35.4 \
   STACKIT_E2E_CNI=cilium \
-  go test -tags=e2e ./test/e2e -v -ginkgo.v \
+  go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
   --ginkgo.focus='upgrade.*worker.*workload'
 ```
 

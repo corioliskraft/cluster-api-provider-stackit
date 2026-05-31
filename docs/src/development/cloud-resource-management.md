@@ -293,19 +293,7 @@ not be the preferred production path.
 
 ## Recommended Milestones
 
-### Milestone 1: Documented Prerequisite Flow
-
-Goal: make current behavior production-understandable without changing APIs.
-
-Tasks:
-
-- Add docs for existing network, security group, SSH key, and image inputs.
-- Add STACKIT CLI/Terraform examples for creating those resources.
-- Clarify that SSH is optional and not used for bootstrap.
-- Clarify that the current e2e runtime package install is a development
-  fallback.
-
-### Milestone 2: Managed Security Groups
+### Milestone 1: Managed Security Groups
 
 Goal: make default clusters secure and reproducible without requiring users to
 manually design firewall rules.
@@ -318,7 +306,7 @@ Tasks:
 - Add unit/envtest/fake SDK coverage.
 - Add real e2e coverage without user-provided security groups.
 
-### Milestone 3: Kubeadm-Ready Images
+### Milestone 2: Kubeadm-Ready Images
 
 Goal: remove package-install variability from the normal workload-cluster path.
 
@@ -330,7 +318,7 @@ Tasks:
 - Keep runtime install path as `cluster-template-development.yaml` or e2e-only
   fallback.
 
-### Milestone 4: Optional Managed Networks
+### Milestone 3: Optional Managed Networks
 
 Goal: decide whether network creation belongs in the provider after the safer
 prerequisite and security group flows are stable.

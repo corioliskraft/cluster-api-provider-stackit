@@ -20,6 +20,17 @@ Common clusterctl variables:
 | `STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE` | `cloud-provider-stackit` image. The image tag minor must match `KUBERNETES_VERSION` |
 | `CLUSTER_CLASS_NAMESPACE` | Namespace containing the ClusterClass |
 
+Optional workload CNI helper variables:
+
+| Variable | Description |
+| --- | --- |
+| `WORKLOAD_KUBECONFIG` | Path to the workload-cluster kubeconfig used by `make install-workload-cni` |
+| `STACKIT_WORKLOAD_CNI` | CNI to install with `make install-workload-cni`; supported values are `cilium` and `calico` |
+| `CILIUM_VERSION` | Cilium version used by the helper, defaults to `1.19.4` |
+| `CILIUM_VALUES` | Helm values file for Cilium, defaults to `templates/addons/cilium-values.yaml` |
+| `CALICO_MANIFEST` | Calico manifest URL or path for the helper |
+| `CNI_MANIFEST` | Custom CNI manifest URL or path; when set, it takes precedence over `STACKIT_WORKLOAD_CNI` |
+
 Development template variables may also include:
 
 | Variable | Description |

@@ -1805,10 +1805,12 @@ func kubectlOutputWithKubeconfig(g Gomega, kubeconfig string, args ...string) st
 }
 
 func waitForWorkloadCCMRollout(kubeconfig string) {
-	cmd := exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", "kube-system", "rollout", "status",
-		"deployment/stackit-cloud-controller-manager", "--timeout=5m")
-	_, err := utils.Run(cmd)
-	Expect(err).NotTo(HaveOccurred(), "embedded cloud-provider-stackit did not roll out")
+	Eventually(func(g Gomega) {
+		cmd := exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", "kube-system", "rollout", "status",
+			"deployment/stackit-cloud-controller-manager", "--timeout=30s")
+		_, err := utils.Run(cmd)
+		g.Expect(err).NotTo(HaveOccurred())
+	}, 5*time.Minute, 10*time.Second).Should(Succeed(), "embedded cloud-provider-stackit did not roll out")
 }
 
 func installWorkloadCNI(kubeconfig string) {

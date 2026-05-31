@@ -49,7 +49,8 @@ API contract details.
   `cloud-provider-stackit` through a Cluster API `ClusterResourceSet`, and the
   NodeRef e2e verifies `StackitMachine`, CAPI `Machine`, and workload `Node`
   provider ID alignment. The template does not install a CNI; users must install
-  one separately after the workload API is reachable.
+  one separately after the workload API is reachable. The repository provides a
+  `make install-workload-cni` helper for repeatable development installs.
 - The release story is not finalized. Local `clusterctl` assets can be
   generated, but the final distribution path is still open. Production use
   needs versioned images, published `clusterctl` assets, upgrade guidance,

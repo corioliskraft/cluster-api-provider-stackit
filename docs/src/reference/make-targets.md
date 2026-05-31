@@ -15,6 +15,7 @@ Common targets:
 | `make build-installer` | Generate `dist/install.yaml` |
 | `make clusterctl-release` | Generate local clusterctl release assets |
 | `make cleanup-stackit` | Delete tagged e2e resources through STACKIT APIs |
+| `make install-workload-cni` | Install Cilium, Calico, or a custom CNI manifest into a workload cluster |
 
 Documentation targets inside `docs/`:
 

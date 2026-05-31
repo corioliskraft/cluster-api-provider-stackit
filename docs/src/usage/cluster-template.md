@@ -50,3 +50,5 @@ unsupported or mismatched versions.
 The template installs the cloud controller manager, not a CNI. After the
 workload API is reachable, install a CNI that matches the configured pod/service
 CIDRs and network policy expectations before expecting Nodes to become Ready.
+For a reproducible development path, use the helper documented in
+[Workload CNI](cni.md).

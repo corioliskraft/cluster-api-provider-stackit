@@ -13,6 +13,7 @@
 
 - [clusterctl](usage/clusterctl.md)
 - [Cluster Template](usage/cluster-template.md)
+- [Workload CNI](usage/cni.md)
 - [ClusterClass](usage/clusterclass.md)
 - [Cluster Upgrade](usage/upgrade.md)
 - [Cleanup](usage/cleanup.md)

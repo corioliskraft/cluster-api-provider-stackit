@@ -14,6 +14,7 @@ Generated files:
 - `cluster-template.yaml`
 - `cluster-template-development.yaml`
 - `cluster-template-topology.yaml`
+- `addons/*.yaml`
 
 The release directory is:
 

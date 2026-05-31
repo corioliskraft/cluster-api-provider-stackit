@@ -5,6 +5,11 @@ CLUSTERCTL_PROVIDER ?= stackit
 CLUSTERCTL_RELEASE_VERSION ?= v0.1.0
 CLUSTERCTL_RELEASE_ROOT ?= dist/clusterctl
 CLUSTERCTL_RELEASE_DIR ?= $(CLUSTERCTL_RELEASE_ROOT)/infrastructure-$(CLUSTERCTL_PROVIDER)/$(CLUSTERCTL_RELEASE_VERSION)
+WORKLOAD_KUBECONFIG ?=
+STACKIT_WORKLOAD_CNI ?= cilium
+CILIUM_VERSION ?= 1.19.4
+CILIUM_VALUES ?= templates/addons/cilium-values.yaml
+CALICO_MANIFEST ?= https://raw.githubusercontent.com/projectcalico/calico/v3.30.0/manifests/calico.yaml
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
@@ -103,6 +108,16 @@ cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 cleanup-stackit: ## Delete STACKIT e2e resources by STACKIT API labels. Requires STACKIT_E2E_TEST_ID.
 	go run ./cmd/cleanup-stackit
 
+.PHONY: install-workload-cni
+install-workload-cni: ## Install a CNI into a workload cluster. Requires WORKLOAD_KUBECONFIG or KUBECONFIG.
+	WORKLOAD_KUBECONFIG="$(WORKLOAD_KUBECONFIG)" \
+	STACKIT_WORKLOAD_CNI="$(STACKIT_WORKLOAD_CNI)" \
+	CILIUM_VERSION="$(CILIUM_VERSION)" \
+	CILIUM_VALUES="$(CILIUM_VALUES)" \
+	CALICO_MANIFEST="$(CALICO_MANIFEST)" \
+	CNI_MANIFEST="$(CNI_MANIFEST)" \
+	hack/install-workload-cni.sh
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	"$(GOLANGCI_LINT)" run
@@ -173,6 +188,8 @@ clusterctl-release: manifests generate kustomize ## Generate clusterctl release 
 	cp templates/cluster-template.yaml "$(CLUSTERCTL_RELEASE_DIR)/cluster-template.yaml"
 	cp templates/cluster-template-development.yaml "$(CLUSTERCTL_RELEASE_DIR)/cluster-template-development.yaml"
 	cp templates/cluster-template-topology.yaml "$(CLUSTERCTL_RELEASE_DIR)/cluster-template-topology.yaml"
+	mkdir -p "$(CLUSTERCTL_RELEASE_DIR)/addons"
+	cp templates/addons/*.yaml "$(CLUSTERCTL_RELEASE_DIR)/addons/"
 
 ##@ Deployment
 

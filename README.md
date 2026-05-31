@@ -122,7 +122,22 @@ local `hack/clusterctl-local.yaml` sets `CLUSTER_RESOURCE_SET=true`.
 
 The default template installs `cloud-provider-stackit`, but it does not install
 a CNI. Install a CNI after the workload API is reachable; the e2e NodeRef path
-uses Cilium by default.
+uses Cilium by default. For a repeatable development install, use:
+
+```sh
+clusterctl get kubeconfig "$CLUSTER_NAME" \
+  --namespace "$NAMESPACE" \
+  > "${CLUSTER_NAME}.kubeconfig"
+
+make install-workload-cni \
+  WORKLOAD_KUBECONFIG="${CLUSTER_NAME}.kubeconfig"
+```
+
+The helper installs Cilium by default using `templates/addons/cilium-values.yaml`.
+Set `STACKIT_WORKLOAD_CNI=calico` to install Calico, or set `CNI_MANIFEST` to
+apply a custom CNI manifest. For production clusters, manage the CNI with Helm,
+GitOps, or an addon provider rather than treating the infrastructure template as
+the CNI lifecycle owner.
 
 Apply the rendered manifest to a management cluster with Cluster API and this provider installed:
 
@@ -259,7 +274,8 @@ make clusterctl-release IMG=<registry>/cluster-api-provider-stackit:<tag>
 
 This writes `infrastructure-components.yaml`, `metadata.yaml`,
 `clusterclass.yaml`, `cluster-template.yaml`,
-`cluster-template-development.yaml`, and `cluster-template-topology.yaml` under
+`cluster-template-development.yaml`, `cluster-template-topology.yaml`, and
+optional addon files under `addons/` to
 `dist/clusterctl/infrastructure-stackit/v0.1.0/`, which matches clusterctl's
 local repository layout.
 

@@ -1,0 +1,20 @@
+# Values for the optional Cilium workload-cluster CNI install.
+#
+# These defaults match templates/cluster-template.yaml:
+# - Cluster.spec.clusterNetwork.pods.cidrBlocks: 192.168.0.0/16
+# - kube-proxy remains installed by kubeadm, so Cilium does not replace it here.
+#
+# Production users should manage CNI lifecycle with Helm, GitOps, or an addon
+# provider and should review MTU, routing, policy, and upgrade settings for
+# their network.
+ipam:
+  mode: cluster-pool
+  operator:
+    clusterPoolIPv4PodCIDRList:
+      - 192.168.0.0/16
+    clusterPoolIPv4MaskSize: 24
+
+kubeProxyReplacement: false
+
+operator:
+  replicas: 1

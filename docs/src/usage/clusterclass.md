@@ -53,3 +53,20 @@ controller manager. It also passes the same development fallback
 images can install `containerd`, `kubelet`, `kubeadm`, and `kubectl` before
 kubeadm runs. For production, prefer kubeadm-ready images and manage addons
 through your normal Helm, GitOps, or addon-provider workflow.
+
+Run the topology workload e2e path independently only when billable STACKIT
+validation is intended:
+
+```sh
+env STACKIT_E2E_TOPOLOGY_WORKLOAD=true \
+  KUBERNETES_VERSION=v1.35.3 \
+  STACKIT_E2E_CNI=cilium \
+  go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+  --ginkgo.focus='topology.*workload' --ginkgo.timeout=90m
+```
+
+Equivalent make target:
+
+```sh
+make test-e2e-workload-topology
+```

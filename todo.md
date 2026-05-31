@@ -92,21 +92,21 @@
 - [x] PR 6: Add worker scale e2e coverage.
   - [x] Scale workers from 1 to 3 and back to 1.
   - [x] Verify providerIDs and no orphaned cloud resources.
-  - [ ] Verify worker Node readiness/removal once workload-cluster bootstrap is enabled.
-- [ ] PR 7: Add Kubernetes upgrade e2e coverage.
+  - [x] Verify worker Node readiness/removal once workload-cluster bootstrap is enabled.
+- [x] PR 7: Add Kubernetes upgrade e2e coverage.
   - [x] Verify MachineDeployment version changes create replacement worker VMs.
   - [x] Verify replacement worker VMs become Ready and old worker VMs are deleted when the old Machine is removed.
-  - [ ] Exercise automatic MachineDeployment rolling completion once workload-cluster Node availability is enabled.
-  - [ ] Exercise KubeadmControlPlane upgrades once workload-cluster bootstrap is enabled.
-  - [ ] Verify upgraded Nodes join and the workload cluster remains reachable once bootstrap is enabled.
+  - [x] Exercise automatic MachineDeployment rolling completion once workload-cluster Node availability is enabled.
+  - [x] Exercise KubeadmControlPlane upgrades once workload-cluster bootstrap is enabled.
+  - [x] Verify upgraded Nodes join and the workload cluster remains reachable once bootstrap is enabled.
 - [x] PR 8: Model STACKIT availability zones as CAPI FailureDomains.
   - [x] Publish failureDomains in StackitCluster status.
   - [x] Validate StackitMachine availability zones and preserve single-AZ templates.
-- [ ] PR 9: Add ClusterClass support.
+- [x] PR 9: Add ClusterClass support.
   - [x] Add ClusterClass and topology templates after create/delete, scale, and upgrade flows are stable.
   - [x] Wire Kubernetes version, control-plane replicas, worker replicas, machine type, image ID, region, network ID, SSH key name, and credentials secret through topology variables.
   - [x] Verify full ClusterClass create/ready/delete flow once workload-cluster bootstrap and node readiness are enabled.
-- [ ] PR 10: Enable ClusterTopology validation for local clusterctl installs.
+- [x] PR 10: Enable ClusterTopology validation for local clusterctl installs.
   - [x] Enable the CAPI `ClusterTopology` feature gate in the local clusterctl configuration.
   - [x] Re-run the ClusterClass apply flow against a management cluster with `ClusterTopology=true`.
 - [ ] PR 11: Add mdBook documentation.

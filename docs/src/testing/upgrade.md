@@ -48,4 +48,50 @@ Pending behavior:
   replicas
 - continuous workload API reachability sampling outside the rollout wait loop
 
+Run the infra-only worker replacement path independently:
+
+```sh
+env STACKIT_E2E_UPGRADE_WORKERS=true \
+  STACKIT_E2E_UPGRADE_FROM=v1.35.3 \
+  STACKIT_E2E_UPGRADE_TO=v1.35.4 \
+  go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+  --ginkgo.focus='replace worker VMs' --ginkgo.timeout=90m
+```
+
+Run the full workload worker upgrade path independently only when billable
+STACKIT e2e validation is intended:
+
+```sh
+env STACKIT_E2E_UPGRADE_WORKLOAD_WORKERS=true \
+  STACKIT_E2E_UPGRADE_FROM=v1.35.3 \
+  STACKIT_E2E_UPGRADE_TO=v1.35.4 \
+  STACKIT_E2E_CNI=cilium \
+  go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+  --ginkgo.focus='workload.*worker.*upgrade' --ginkgo.timeout=90m
+```
+
+Equivalent make target:
+
+```sh
+make test-e2e-workload-upgrade-workers
+```
+
+Run the full workload control-plane upgrade path independently only when
+billable STACKIT e2e validation is intended:
+
+```sh
+env STACKIT_E2E_UPGRADE_WORKLOAD_CONTROL_PLANE=true \
+  STACKIT_E2E_UPGRADE_FROM=v1.35.3 \
+  STACKIT_E2E_UPGRADE_TO=v1.35.4 \
+  STACKIT_E2E_CNI=cilium \
+  go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+  --ginkgo.focus='workload.*control.*upgrade' --ginkgo.timeout=90m
+```
+
+Equivalent make target:
+
+```sh
+make test-e2e-workload-upgrade-control-plane
+```
+
 See [Cluster Upgrade](../usage/upgrade.md) for the user-facing upgrade flow.

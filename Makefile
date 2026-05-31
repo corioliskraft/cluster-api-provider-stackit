@@ -100,6 +100,36 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
 	$(MAKE) cleanup-test-e2e
 
+.PHONY: test-e2e-workload-noderef
+test-e2e-workload-noderef: setup-test-e2e manifests generate fmt vet ## Run billable workload NodeRef/Ready e2e. Requires STACKIT cloud env and credentials Secret.
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) STACKIT_E2E_NODE_REF=true \
+		go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+		--ginkgo.focus='align StackitMachine' --ginkgo.timeout=90m
+
+.PHONY: test-e2e-workload-scale
+test-e2e-workload-scale: setup-test-e2e manifests generate fmt vet ## Run billable workload worker scale/Ready e2e. Requires STACKIT cloud env and credentials Secret.
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) STACKIT_E2E_SCALE_WORKLOAD=true \
+		go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+		--ginkgo.focus='scale workload worker Nodes' --ginkgo.timeout=90m
+
+.PHONY: test-e2e-workload-upgrade-workers
+test-e2e-workload-upgrade-workers: setup-test-e2e manifests generate fmt vet ## Run billable workload worker upgrade/Ready e2e. Requires STACKIT cloud env and credentials Secret.
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) STACKIT_E2E_UPGRADE_WORKLOAD_WORKERS=true \
+		go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+		--ginkgo.focus='workload.*worker.*upgrade' --ginkgo.timeout=90m
+
+.PHONY: test-e2e-workload-upgrade-control-plane
+test-e2e-workload-upgrade-control-plane: setup-test-e2e manifests generate fmt vet ## Run billable workload control-plane upgrade/Ready e2e. Requires STACKIT cloud env and credentials Secret.
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) STACKIT_E2E_UPGRADE_WORKLOAD_CONTROL_PLANE=true \
+		go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+		--ginkgo.focus='workload.*control.*upgrade' --ginkgo.timeout=90m
+
+.PHONY: test-e2e-workload-topology
+test-e2e-workload-topology: setup-test-e2e manifests generate fmt vet ## Run billable ClusterClass topology workload Ready e2e. Requires STACKIT cloud env and credentials Secret.
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) STACKIT_E2E_TOPOLOGY_WORKLOAD=true \
+		go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+		--ginkgo.focus='topology.*workload' --ginkgo.timeout=90m
+
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)

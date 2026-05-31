@@ -16,6 +16,11 @@ Common targets:
 | `make clusterctl-release` | Generate local clusterctl release assets |
 | `make cleanup-stackit` | Delete tagged e2e resources through STACKIT APIs |
 | `make install-workload-cni` | Install Cilium, Calico, or a custom CNI manifest into a workload cluster |
+| `make test-e2e-workload-noderef` | Run billable workload NodeRef/providerID and Ready Node e2e |
+| `make test-e2e-workload-scale` | Run billable workload worker scale and Ready Node e2e |
+| `make test-e2e-workload-upgrade-workers` | Run billable workload worker upgrade and Ready replacement Node e2e |
+| `make test-e2e-workload-upgrade-control-plane` | Run billable workload control-plane upgrade and Ready replacement Node e2e |
+| `make test-e2e-workload-topology` | Run billable ClusterClass topology create/ready/delete e2e |
 
 Documentation targets inside `docs/`:
 

@@ -86,18 +86,18 @@ For full Cluster API support, the provider should complete the following areas:
   `Machine.spec.failureDomain`, the infrastructure machine must be placed in
   that failure domain. The provider should also consider surfacing the actual
   placement through `StackitMachine.status.failureDomain`.
-- Complete ClusterClass support. `StackitClusterTemplate` and
-  `StackitMachineTemplate` exist, but the template resources should support
-  template metadata for labels and annotations. Full create/ready/delete e2e
-  coverage for topology clusters is still required.
+- Continue hardening ClusterClass support. Topology create/ready/delete e2e now
+  covers a 1 control-plane / 1 worker workload cluster, but highly available
+  topology variants and template metadata behavior still need focused coverage.
 - Keep the `cloud-provider-stackit` integration aligned with Kubernetes minor
   versions. Supported workload cluster minors are currently v1.33.x through
   v1.36.x, and the cloud-provider image minor must match the workload cluster
   Kubernetes minor.
-- Harden scale, upgrade, remediation, and deletion behavior. Worker scale and
-  replacement upgrade coverage exists, but full support should include control
-  plane replacement, MachineHealthCheck remediation, interrupted deletes,
-  orphan cleanup, and cloud-side drift handling.
+- Harden scale, upgrade, remediation, and deletion behavior. Worker scale,
+  worker upgrade, and single-control-plane upgrade coverage exists, but full
+  support should include highly available control-plane replacement,
+  MachineHealthCheck remediation, interrupted deletes, orphan cleanup, and
+  cloud-side drift handling.
 
 The relevant Cluster API contract areas are the InfraCluster and InfraMachine
 contracts. `StackitCluster` must provide the control plane endpoint,

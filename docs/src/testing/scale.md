@@ -39,5 +39,28 @@ Validated workload behavior:
 - scaled-down STACKIT VMs are deleted
 - no tagged cloud resources remain orphaned
 
-Run the full workload path only when billable STACKIT e2e validation is
-intended.
+Run the infra-only path independently:
+
+```sh
+env STACKIT_E2E_SCALE_WORKERS=true \
+  KUBERNETES_VERSION=v1.35.3 \
+  go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+  --ginkgo.focus='scale a worker MachineDeployment' --ginkgo.timeout=90m
+```
+
+Run the full workload path independently only when billable STACKIT e2e
+validation is intended:
+
+```sh
+env STACKIT_E2E_SCALE_WORKLOAD=true \
+  KUBERNETES_VERSION=v1.35.3 \
+  STACKIT_E2E_CNI=cilium \
+  go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+  --ginkgo.focus='scale workload worker Nodes' --ginkgo.timeout=90m
+```
+
+Equivalent make target:
+
+```sh
+make test-e2e-workload-scale
+```

@@ -42,6 +42,7 @@
 - [PR Plan](development/pr-plan.md)
 - [Release Packaging](development/release-packaging.md)
 - [Cloud Resource Management](development/cloud-resource-management.md)
+- [Full Workload E2E Plan](development/full-workload-e2e-plan.md)
 
 # Reference
 

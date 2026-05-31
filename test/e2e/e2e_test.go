@@ -938,6 +938,145 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(loadBalancers).To(BeEmpty())
 			}, 20*time.Minute, 15*time.Second).Should(Succeed())
 		})
+
+		It("should complete a workload worker MachineDeployment upgrade with Ready Nodes", func() {
+			if os.Getenv("STACKIT_E2E_UPGRADE_WORKLOAD_WORKERS") != "true" {
+				Skip("set STACKIT_E2E_UPGRADE_WORKLOAD_WORKERS=true to run the real workload MachineDeployment upgrade e2e test")
+			}
+
+			cfg := stackitVMConfigFromEnv()
+			ctx := context.Background()
+			cloudClient := stackitCloudClientFromCredentialsSecret(ctx, cfg)
+			credentials := stackitCredentialsSecret(ctx, cfg.CredentialsSecretName, cfg.CredentialsSecretNS)
+			serviceAccountJSON, ok := credentials["serviceaccount.json"]
+			Expect(ok).To(BeTrue(), "credentials Secret is missing serviceaccount.json")
+			clusterName := fmt.Sprintf("stackit-e2e-wupgrade-%d", time.Now().Unix())
+			testID := envDefault("STACKIT_E2E_TEST_ID", clusterName)
+			leakTags := stackitE2ETags(testID)
+			machineDeploymentName := clusterName + "-md-0"
+			upgradeFrom := envDefault("STACKIT_E2E_UPGRADE_FROM", defaultKubernetesVersion)
+			upgradeTo := envDefault("STACKIT_E2E_UPGRADE_TO", "v1.35.4")
+			validateSupportedKubernetesVersion(upgradeFrom)
+			validateSupportedKubernetesVersion(upgradeTo)
+			observedInstanceIDs := []string{}
+
+			By("cleaning up stale STACKIT resources for the e2e test ID")
+			Expect(cloud.CleanupByTags(ctx, cloudClient, leakTags)).To(Succeed())
+
+			By("applying a real kubeadm workload Cluster fixture for worker upgrade")
+			fixture := renderKubeadmWorkloadClusterFixture(kubeadmWorkloadFixtureOptions{
+				ClusterName:           clusterName,
+				TestID:                testID,
+				Config:                cfg,
+				KubernetesVersion:     upgradeFrom,
+				ServiceAccountJSON:    serviceAccountJSON,
+				ControlPlaneReplicas:  1,
+				WorkerReplicas:        2,
+				APIServerLoadBalancer: true,
+				IncludeCCMAddon:       true,
+			})
+			fixturePath := writeTempManifest("stackit-upgrade-workload-e2e-*.yaml", fixture)
+			var workloadKubeconfig string
+			defer func() {
+				cleanupStackitKubeadmClusterFixture(clusterName, cfg.Namespace)
+				cleanupCloudServersByID(ctx, cloudClient, observedInstanceIDs)
+				if err := cloud.CleanupByTags(ctx, cloudClient, leakTags); err != nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "STACKIT API cleanup warning: %v\n", err)
+				}
+				if workloadKubeconfig != "" {
+					_ = os.Remove(workloadKubeconfig)
+				}
+				_ = os.Remove(fixturePath)
+			}()
+
+			cmd := exec.Command("kubectl", "apply", "-f", fixturePath)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply STACKIT workload worker upgrade fixture")
+
+			waitForKubeadmWorkloadClusterReady(workloadReadinessOptions{
+				Namespace:           cfg.Namespace,
+				ClusterName:         clusterName,
+				TestID:              testID,
+				WantNodes:           3,
+				WantMachines:        3,
+				InstallCNI:          true,
+				WaitForCCM:          true,
+				ObservedInstanceIDs: &observedInstanceIDs,
+			}, &workloadKubeconfig)
+
+			var initialWorkerNodeNames []string
+			var initialWorkerInstanceIDs []string
+			Eventually(func(g Gomega) {
+				expectMachineDeploymentReadyReplicas(g, cfg.Namespace, machineDeploymentName, 2)
+				workers := workerMachinesForDeployment(g, cfg.Namespace, clusterName, machineDeploymentName)
+				g.Expect(workers).To(HaveLen(2))
+				expectMachinesVersion(g, workers, upgradeFrom)
+				expectWorkloadNodesReadyForMachines(g, workloadKubeconfig, workers)
+				initialWorkerNodeNames = nodeNamesForMachines(workers)
+				initialWorkerInstanceIDs = stackitInstanceIDsForMachines(g, cfg.Namespace, testID, workers)
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
+			Expect(initialWorkerNodeNames).To(HaveLen(2))
+			Expect(initialWorkerInstanceIDs).To(HaveLen(2))
+			observedInstanceIDs = appendUnique(observedInstanceIDs, initialWorkerInstanceIDs...)
+
+			By("patching the workload worker MachineDeployment Kubernetes version")
+			patch := fmt.Sprintf(`{"spec":{"template":{"spec":{"version":"%s"}}}}`, upgradeTo)
+			cmd = exec.Command("kubectl", "patch", "machinedeployment", machineDeploymentName, "-n", cfg.Namespace, "--type=merge", "-p", patch)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to patch workload MachineDeployment version")
+
+			var upgradedWorkerNodeNames []string
+			var upgradedWorkerInstanceIDs []string
+			Eventually(func(g Gomega) {
+				expectMachineDeploymentRollout(g, cfg.Namespace, machineDeploymentName, 2)
+				machines := readyStackitMachines(g, cfg.Namespace, testID, 3)
+				observedInstanceIDs = appendUnique(observedInstanceIDs, instanceIDs(machines)...)
+				workers := workerMachinesForDeployment(g, cfg.Namespace, clusterName, machineDeploymentName)
+				g.Expect(workers).To(HaveLen(2))
+				expectMachinesVersion(g, workers, upgradeTo)
+				expectWorkloadNodesReadyForMachines(g, workloadKubeconfig, workers)
+				expectWorkloadNodesReady(g, workloadKubeconfig, 3)
+				upgradedWorkerNodeNames = nodeNamesForMachines(workers)
+				upgradedWorkerInstanceIDs = stackitInstanceIDsForMachines(g, cfg.Namespace, testID, workers)
+			}, 60*time.Minute, 15*time.Second).Should(Succeed())
+			Expect(upgradedWorkerNodeNames).To(HaveLen(2))
+			Expect(upgradedWorkerInstanceIDs).To(HaveLen(2))
+
+			oldWorkerNodeNames := difference(initialWorkerNodeNames, upgradedWorkerNodeNames)
+			Expect(oldWorkerNodeNames).To(HaveLen(2))
+
+			By("verifying old workload worker Nodes were removed")
+			Eventually(func(g Gomega) {
+				expectWorkloadNodesGone(g, workloadKubeconfig, oldWorkerNodeNames)
+			}, 10*time.Minute, 15*time.Second).Should(Succeed())
+
+			deletedInstanceIDs := difference(initialWorkerInstanceIDs, upgradedWorkerInstanceIDs)
+			Expect(deletedInstanceIDs).To(HaveLen(2))
+
+			By("verifying old workload worker VMs were deleted from STACKIT")
+			for _, instanceID := range deletedInstanceIDs {
+				instanceID := instanceID
+				Eventually(func(g Gomega) {
+					_, err := cloudClient.GetServer(ctx, instanceID)
+					g.Expect(cloud.IsNotFound(err)).To(BeTrue(), "expected old server %s to be deleted, got %v", instanceID, err)
+				}, 20*time.Minute, 15*time.Second).Should(Succeed())
+			}
+
+			By("deleting the workload worker upgrade Cluster")
+			cmd = exec.Command("kubectl", "delete", "cluster", clusterName, "-n", cfg.Namespace, "--wait=true", "--timeout=45m")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to delete workload worker upgrade Cluster")
+
+			By("verifying no tagged STACKIT resources remain for the e2e test ID")
+			Eventually(func(g Gomega) {
+				servers, err := cloudClient.ListServersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(servers).To(BeEmpty())
+				loadBalancers, err := cloudClient.ListAPIServerLoadBalancersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(loadBalancers).To(BeEmpty())
+			}, 20*time.Minute, 15*time.Second).Should(Succeed())
+		})
 	})
 })
 
@@ -1914,6 +2053,7 @@ type capiMachineItem struct {
 		Labels map[string]string `json:"labels"`
 	} `json:"metadata"`
 	Spec struct {
+		Version           string  `json:"version"`
 		ProviderID        *string `json:"providerID"`
 		InfrastructureRef struct {
 			APIGroup string `json:"apiGroup"`
@@ -1930,8 +2070,11 @@ type capiMachineItem struct {
 
 type machineDeploymentItem struct {
 	Status struct {
-		Replicas      int `json:"replicas"`
-		ReadyReplicas int `json:"readyReplicas"`
+		Replicas            int `json:"replicas"`
+		ReadyReplicas       int `json:"readyReplicas"`
+		UpdatedReplicas     int `json:"updatedReplicas"`
+		UpToDateReplicas    int `json:"upToDateReplicas"`
+		UnavailableReplicas int `json:"unavailableReplicas"`
 	} `json:"status"`
 }
 
@@ -1949,13 +2092,39 @@ func expectCAPIMachinesWithProviderIDs(g Gomega, namespace, clusterName string, 
 }
 
 func expectMachineDeploymentReadyReplicas(g Gomega, namespace, name string, replicas int) {
+	machineDeployment := machineDeploymentForName(g, namespace, name)
+	g.Expect(machineDeployment.Status.Replicas).To(Equal(replicas), "MachineDeployment %s has unexpected replicas", name)
+	g.Expect(machineDeployment.Status.ReadyReplicas).To(Equal(replicas), "MachineDeployment %s has unexpected readyReplicas", name)
+}
+
+func expectMachineDeploymentRollout(g Gomega, namespace, name string, replicas int) {
+	machineDeployment := machineDeploymentForName(g, namespace, name)
+	g.Expect(machineDeployment.Status.Replicas).To(Equal(replicas), "MachineDeployment %s has unexpected replicas", name)
+	g.Expect(currentMachineDeploymentReplicas(machineDeployment)).To(Equal(replicas), "MachineDeployment %s has unexpected updated/upToDate replicas", name)
+	g.Expect(machineDeployment.Status.ReadyReplicas).To(Equal(replicas), "MachineDeployment %s has unexpected readyReplicas", name)
+	g.Expect(machineDeployment.Status.UnavailableReplicas).To(BeZero(), "MachineDeployment %s has unavailable replicas", name)
+}
+
+func machineDeploymentForName(g Gomega, namespace, name string) machineDeploymentItem {
 	cmd := exec.Command("kubectl", "get", "machinedeployment", name, "-n", namespace, "-o", "json")
 	output, err := utils.Run(cmd)
 	g.Expect(err).NotTo(HaveOccurred())
 	var machineDeployment machineDeploymentItem
 	g.Expect(json.Unmarshal([]byte(output), &machineDeployment)).To(Succeed())
-	g.Expect(machineDeployment.Status.Replicas).To(Equal(replicas), "MachineDeployment %s has unexpected replicas", name)
-	g.Expect(machineDeployment.Status.ReadyReplicas).To(Equal(replicas), "MachineDeployment %s has unexpected readyReplicas", name)
+	return machineDeployment
+}
+
+func expectMachinesVersion(g Gomega, machines []capiMachineItem, version string) {
+	for _, machine := range machines {
+		g.Expect(machine.Spec.Version).To(Equal(version), "Machine %s has unexpected Kubernetes version", machine.Metadata.Name)
+	}
+}
+
+func currentMachineDeploymentReplicas(machineDeployment machineDeploymentItem) int {
+	if machineDeployment.Status.UpdatedReplicas != 0 {
+		return machineDeployment.Status.UpdatedReplicas
+	}
+	return machineDeployment.Status.UpToDateReplicas
 }
 
 func workerMachinesForDeployment(g Gomega, namespace, clusterName, deploymentName string) []capiMachineItem {
@@ -2216,6 +2385,22 @@ func nodeNamesForMachines(machines []capiMachineItem) []string {
 	out := make([]string, 0, len(machines))
 	for _, machine := range machines {
 		out = append(out, machine.Status.NodeRef.Name)
+	}
+	return out
+}
+
+func stackitInstanceIDsForMachines(g Gomega, namespace, testID string, machines []capiMachineItem) []string {
+	stackitMachines := map[string]stackitMachineItem{}
+	for _, machine := range stackitMachinesForTestID(g, namespace, testID) {
+		stackitMachines[machine.Metadata.Name] = machine
+	}
+
+	out := make([]string, 0, len(machines))
+	for _, machine := range machines {
+		stackitMachine, ok := stackitMachines[machine.Spec.InfrastructureRef.Name]
+		g.Expect(ok).To(BeTrue(), "StackitMachine %s referenced by Machine %s not found", machine.Spec.InfrastructureRef.Name, machine.Metadata.Name)
+		g.Expect(stackitMachine.Status.InstanceID).NotTo(BeEmpty(), "StackitMachine %s has no instanceID", stackitMachine.Metadata.Name)
+		out = append(out, stackitMachine.Status.InstanceID)
 	}
 	return out
 }

@@ -390,7 +390,7 @@ env STACKIT_E2E_UPGRADE_WORKLOAD_WORKERS=true \
   STACKIT_E2E_UPGRADE_TO=v1.35.4 \
   STACKIT_E2E_CNI=cilium \
   go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
-  --ginkgo.focus='upgrade.*worker.*workload'
+  --ginkgo.focus='workload.*worker.*upgrade'
 ```
 
 ## Milestone 4: KubeadmControlPlane Upgrade E2E

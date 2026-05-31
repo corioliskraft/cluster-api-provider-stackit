@@ -424,16 +424,18 @@ Acceptance criteria:
 - The test fails if the workload API becomes permanently unreachable.
 - The test proves the control-plane Node is Ready after upgrade.
 - The scenario can be run without the worker upgrade test.
+- The billable real-cloud validation below passes before the milestone is
+  marked complete.
 
-Suggested command:
+Required billable validation:
 
 ```sh
 env STACKIT_E2E_UPGRADE_WORKLOAD_CONTROL_PLANE=true \
   STACKIT_E2E_UPGRADE_FROM=v1.35.3 \
   STACKIT_E2E_UPGRADE_TO=v1.35.4 \
   STACKIT_E2E_CNI=cilium \
-  go test -tags=e2e ./test/e2e -v -ginkgo.v \
-  --ginkgo.focus='upgrade.*control.*workload'
+  go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+  --ginkgo.focus='workload.*control.*upgrade'
 ```
 
 ## Milestone 5: Full ClusterClass Topology E2E

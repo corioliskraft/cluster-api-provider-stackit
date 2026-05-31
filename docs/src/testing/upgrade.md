@@ -1,6 +1,6 @@
 # Upgrade
 
-Upgrade coverage has two independently gated e2e paths.
+Upgrade coverage has three independently gated e2e paths.
 
 The infra-only path, gated by `STACKIT_E2E_UPGRADE_WORKERS=true`, focuses on
 MachineDeployment worker replacement with a static bootstrap Secret.
@@ -24,9 +24,28 @@ Validated workload worker behavior:
 - old worker VMs are deleted from STACKIT
 - no tagged cloud resources remain orphaned
 
+The full workload control-plane path, gated by
+`STACKIT_E2E_UPGRADE_WORKLOAD_CONTROL_PLANE=true`, uses the real kubeadm
+workload fixture with CNI, `cloud-provider-stackit`, and an API server load
+balancer.
+
+Validated workload control-plane behavior:
+
+- initial control-plane and worker Nodes become Ready
+- changing the KubeadmControlPlane Kubernetes version completes a CAPI rollout
+- workload API reachability recovers through the API server load balancer
+- upgraded control-plane Node is Ready and matches Machine provider IDs
+- old control-plane VM is deleted from STACKIT if replacement occurred
+- no tagged cloud resources remain orphaned
+
 Pending behavior:
 
-- KubeadmControlPlane upgrade e2e
-- workload-cluster reachability throughout the upgrade
+- old single-node control-plane Node object cleanup after KubeadmControlPlane
+  replacement. The billable Milestone 4 validation observed the old Machine and
+  VM being deleted while the old workload Node remained
+  `NotReady,SchedulingDisabled`.
+- highly available KubeadmControlPlane upgrade e2e with three control-plane
+  replicas
+- continuous workload API reachability sampling outside the rollout wait loop
 
 See [Cluster Upgrade](../usage/upgrade.md) for the user-facing upgrade flow.

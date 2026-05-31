@@ -1077,6 +1077,131 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(loadBalancers).To(BeEmpty())
 			}, 20*time.Minute, 15*time.Second).Should(Succeed())
 		})
+
+		It("should complete a workload control-plane upgrade with a Ready Node", func() {
+			if os.Getenv("STACKIT_E2E_UPGRADE_WORKLOAD_CONTROL_PLANE") != "true" {
+				Skip("set STACKIT_E2E_UPGRADE_WORKLOAD_CONTROL_PLANE=true to run the real workload KubeadmControlPlane upgrade e2e test")
+			}
+
+			cfg := stackitVMConfigFromEnv()
+			ctx := context.Background()
+			cloudClient := stackitCloudClientFromCredentialsSecret(ctx, cfg)
+			credentials := stackitCredentialsSecret(ctx, cfg.CredentialsSecretName, cfg.CredentialsSecretNS)
+			serviceAccountJSON, ok := credentials["serviceaccount.json"]
+			Expect(ok).To(BeTrue(), "credentials Secret is missing serviceaccount.json")
+			clusterName := fmt.Sprintf("stackit-e2e-cpupg-%d", time.Now().Unix())
+			testID := envDefault("STACKIT_E2E_TEST_ID", clusterName)
+			leakTags := stackitE2ETags(testID)
+			kubeadmControlPlaneName := clusterName + "-control-plane"
+			upgradeFrom := envDefault("STACKIT_E2E_UPGRADE_FROM", defaultKubernetesVersion)
+			upgradeTo := envDefault("STACKIT_E2E_UPGRADE_TO", "v1.35.4")
+			validateSupportedKubernetesVersion(upgradeFrom)
+			validateSupportedKubernetesVersion(upgradeTo)
+			observedInstanceIDs := []string{}
+
+			By("cleaning up stale STACKIT resources for the e2e test ID")
+			Expect(cloud.CleanupByTags(ctx, cloudClient, leakTags)).To(Succeed())
+
+			By("applying a real kubeadm workload Cluster fixture for control-plane upgrade")
+			fixture := renderKubeadmWorkloadClusterFixture(kubeadmWorkloadFixtureOptions{
+				ClusterName:           clusterName,
+				TestID:                testID,
+				Config:                cfg,
+				KubernetesVersion:     upgradeFrom,
+				ServiceAccountJSON:    serviceAccountJSON,
+				ControlPlaneReplicas:  1,
+				WorkerReplicas:        1,
+				APIServerLoadBalancer: true,
+				IncludeCCMAddon:       true,
+			})
+			fixturePath := writeTempManifest("stackit-cp-upgrade-workload-e2e-*.yaml", fixture)
+			var workloadKubeconfig string
+			defer func() {
+				cleanupStackitKubeadmClusterFixture(clusterName, cfg.Namespace)
+				cleanupCloudServersByID(ctx, cloudClient, observedInstanceIDs)
+				if err := cloud.CleanupByTags(ctx, cloudClient, leakTags); err != nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "STACKIT API cleanup warning: %v\n", err)
+				}
+				if workloadKubeconfig != "" {
+					_ = os.Remove(workloadKubeconfig)
+				}
+				_ = os.Remove(fixturePath)
+			}()
+
+			cmd := exec.Command("kubectl", "apply", "-f", fixturePath)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply STACKIT workload control-plane upgrade fixture")
+
+			waitForKubeadmWorkloadClusterReady(workloadReadinessOptions{
+				Namespace:           cfg.Namespace,
+				ClusterName:         clusterName,
+				TestID:              testID,
+				WantNodes:           2,
+				WantMachines:        2,
+				InstallCNI:          true,
+				WaitForCCM:          true,
+				ObservedInstanceIDs: &observedInstanceIDs,
+			}, &workloadKubeconfig)
+
+			var initialControlPlaneInstanceIDs []string
+			Eventually(func(g Gomega) {
+				expectKubeadmControlPlaneReadyReplicas(g, cfg.Namespace, kubeadmControlPlaneName, 1)
+				controlPlanes := controlPlaneMachinesForCluster(g, cfg.Namespace, clusterName)
+				g.Expect(controlPlanes).To(HaveLen(1))
+				expectMachinesVersion(g, controlPlanes, upgradeFrom)
+				expectWorkloadNodesReadyForMachines(g, workloadKubeconfig, controlPlanes)
+				initialControlPlaneInstanceIDs = stackitInstanceIDsForMachines(g, cfg.Namespace, testID, controlPlanes)
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
+			Expect(initialControlPlaneInstanceIDs).To(HaveLen(1))
+			observedInstanceIDs = appendUnique(observedInstanceIDs, initialControlPlaneInstanceIDs...)
+
+			By("patching the workload KubeadmControlPlane Kubernetes version")
+			patch := fmt.Sprintf(`{"spec":{"version":"%s"}}`, upgradeTo)
+			cmd = exec.Command("kubectl", "patch", "kubeadmcontrolplane", kubeadmControlPlaneName, "-n", cfg.Namespace, "--type=merge", "-p", patch)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to patch workload KubeadmControlPlane version")
+
+			var upgradedControlPlaneInstanceIDs []string
+			Eventually(func(g Gomega) {
+				output := kubectlOutputWithKubeconfig(g, workloadKubeconfig, "get", "ns", "kube-system", "-o", "name")
+				g.Expect(output).To(Equal("namespace/kube-system"))
+				expectKubeadmControlPlaneRollout(g, cfg.Namespace, kubeadmControlPlaneName, 1)
+				machines := readyStackitMachines(g, cfg.Namespace, testID, 2)
+				observedInstanceIDs = appendUnique(observedInstanceIDs, instanceIDs(machines)...)
+				controlPlanes := controlPlaneMachinesForCluster(g, cfg.Namespace, clusterName)
+				g.Expect(controlPlanes).To(HaveLen(1))
+				expectMachinesVersion(g, controlPlanes, upgradeTo)
+				expectWorkloadNodesReadyForMachines(g, workloadKubeconfig, controlPlanes)
+				expectProviderIDNodeRefAlignment(g, cfg.Namespace, clusterName, testID, workloadKubeconfig, 2)
+				upgradedControlPlaneInstanceIDs = stackitInstanceIDsForMachines(g, cfg.Namespace, testID, controlPlanes)
+			}, 60*time.Minute, 15*time.Second).Should(Succeed())
+			Expect(upgradedControlPlaneInstanceIDs).To(HaveLen(1))
+
+			deletedInstanceIDs := difference(initialControlPlaneInstanceIDs, upgradedControlPlaneInstanceIDs)
+			By("verifying old workload control-plane VMs were deleted from STACKIT when replaced")
+			for _, instanceID := range deletedInstanceIDs {
+				instanceID := instanceID
+				Eventually(func(g Gomega) {
+					_, err := cloudClient.GetServer(ctx, instanceID)
+					g.Expect(cloud.IsNotFound(err)).To(BeTrue(), "expected old server %s to be deleted, got %v", instanceID, err)
+				}, 20*time.Minute, 15*time.Second).Should(Succeed())
+			}
+
+			By("deleting the workload control-plane upgrade Cluster")
+			cmd = exec.Command("kubectl", "delete", "cluster", clusterName, "-n", cfg.Namespace, "--wait=true", "--timeout=45m")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to delete workload control-plane upgrade Cluster")
+
+			By("verifying no tagged STACKIT resources remain for the e2e test ID")
+			Eventually(func(g Gomega) {
+				servers, err := cloudClient.ListServersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(servers).To(BeEmpty())
+				loadBalancers, err := cloudClient.ListAPIServerLoadBalancersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(loadBalancers).To(BeEmpty())
+			}, 20*time.Minute, 15*time.Second).Should(Succeed())
+		})
 	})
 })
 
@@ -2078,6 +2203,16 @@ type machineDeploymentItem struct {
 	} `json:"status"`
 }
 
+type kubeadmControlPlaneItem struct {
+	Status struct {
+		Replicas            int `json:"replicas"`
+		ReadyReplicas       int `json:"readyReplicas"`
+		UpdatedReplicas     int `json:"updatedReplicas"`
+		UpToDateReplicas    int `json:"upToDateReplicas"`
+		UnavailableReplicas int `json:"unavailableReplicas"`
+	} `json:"status"`
+}
+
 func expectCAPIMachinesWithProviderIDs(g Gomega, namespace, clusterName string, want int) {
 	cmd := exec.Command("kubectl", "get", "machines", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name="+clusterName, "-o", "json")
 	output, err := utils.Run(cmd)
@@ -2105,6 +2240,20 @@ func expectMachineDeploymentRollout(g Gomega, namespace, name string, replicas i
 	g.Expect(machineDeployment.Status.UnavailableReplicas).To(BeZero(), "MachineDeployment %s has unavailable replicas", name)
 }
 
+func expectKubeadmControlPlaneReadyReplicas(g Gomega, namespace, name string, replicas int) {
+	controlPlane := kubeadmControlPlaneForName(g, namespace, name)
+	g.Expect(controlPlane.Status.Replicas).To(Equal(replicas), "KubeadmControlPlane %s has unexpected replicas", name)
+	g.Expect(controlPlane.Status.ReadyReplicas).To(Equal(replicas), "KubeadmControlPlane %s has unexpected readyReplicas", name)
+}
+
+func expectKubeadmControlPlaneRollout(g Gomega, namespace, name string, replicas int) {
+	controlPlane := kubeadmControlPlaneForName(g, namespace, name)
+	g.Expect(controlPlane.Status.Replicas).To(Equal(replicas), "KubeadmControlPlane %s has unexpected replicas", name)
+	g.Expect(currentKubeadmControlPlaneReplicas(controlPlane)).To(Equal(replicas), "KubeadmControlPlane %s has unexpected updated/upToDate replicas", name)
+	g.Expect(controlPlane.Status.ReadyReplicas).To(Equal(replicas), "KubeadmControlPlane %s has unexpected readyReplicas", name)
+	g.Expect(controlPlane.Status.UnavailableReplicas).To(BeZero(), "KubeadmControlPlane %s has unavailable replicas", name)
+}
+
 func machineDeploymentForName(g Gomega, namespace, name string) machineDeploymentItem {
 	cmd := exec.Command("kubectl", "get", "machinedeployment", name, "-n", namespace, "-o", "json")
 	output, err := utils.Run(cmd)
@@ -2112,6 +2261,15 @@ func machineDeploymentForName(g Gomega, namespace, name string) machineDeploymen
 	var machineDeployment machineDeploymentItem
 	g.Expect(json.Unmarshal([]byte(output), &machineDeployment)).To(Succeed())
 	return machineDeployment
+}
+
+func kubeadmControlPlaneForName(g Gomega, namespace, name string) kubeadmControlPlaneItem {
+	cmd := exec.Command("kubectl", "get", "kubeadmcontrolplane", name, "-n", namespace, "-o", "json")
+	output, err := utils.Run(cmd)
+	g.Expect(err).NotTo(HaveOccurred())
+	var controlPlane kubeadmControlPlaneItem
+	g.Expect(json.Unmarshal([]byte(output), &controlPlane)).To(Succeed())
+	return controlPlane
 }
 
 func expectMachinesVersion(g Gomega, machines []capiMachineItem, version string) {
@@ -2127,11 +2285,29 @@ func currentMachineDeploymentReplicas(machineDeployment machineDeploymentItem) i
 	return machineDeployment.Status.UpToDateReplicas
 }
 
+func currentKubeadmControlPlaneReplicas(controlPlane kubeadmControlPlaneItem) int {
+	if controlPlane.Status.UpdatedReplicas != 0 {
+		return controlPlane.Status.UpdatedReplicas
+	}
+	return controlPlane.Status.UpToDateReplicas
+}
+
 func workerMachinesForDeployment(g Gomega, namespace, clusterName, deploymentName string) []capiMachineItem {
 	machines := capiMachinesForCluster(g, namespace, clusterName)
 	out := []capiMachineItem{}
 	for _, machine := range machines {
 		if machine.Metadata.Labels["cluster.x-k8s.io/deployment-name"] == deploymentName {
+			out = append(out, machine)
+		}
+	}
+	return out
+}
+
+func controlPlaneMachinesForCluster(g Gomega, namespace, clusterName string) []capiMachineItem {
+	machines := capiMachinesForCluster(g, namespace, clusterName)
+	out := []capiMachineItem{}
+	for _, machine := range machines {
+		if _, ok := machine.Metadata.Labels["cluster.x-k8s.io/control-plane"]; ok {
 			out = append(out, machine)
 		}
 	}

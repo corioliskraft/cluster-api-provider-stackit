@@ -418,6 +418,10 @@ Implementation tasks:
   - Machine/Node provider IDs remain aligned
   - old control-plane VM is deleted if replacement occurred
 - Keep cloud leak checks for servers and load balancers.
+- Do not require the old single-node control-plane workload Node object to be
+  removed yet. Billable validation showed CAPI can delete the old Machine and
+  STACKIT VM while the old workload Node remains `NotReady,SchedulingDisabled`;
+  track that as a follow-up gap instead of hiding it in this milestone.
 
 Acceptance criteria:
 

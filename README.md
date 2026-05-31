@@ -13,7 +13,7 @@ make -C docs serve
 
 ## Status
 
-This provider is in early development. The controller and SDK paths have unit/envtest coverage, and real STACKIT e2e coverage exists for VM lifecycle, create/delete, and the 1 control-plane / 1 worker workload-cluster NodeRef/Node readiness path. Broader workload-cluster e2e coverage for scale, upgrades, and ClusterClass is still pending.
+This provider is in early development. The controller and SDK paths have unit/envtest coverage, and real STACKIT e2e coverage exists for VM lifecycle, create/delete, workload-cluster Node readiness, worker scale, worker/control-plane upgrade, and ClusterClass topology create/ready/delete paths.
 
 ## Prerequisites
 

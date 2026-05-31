@@ -26,14 +26,12 @@ The assumptions below were checked against the current code and docs:
   `MachineDeployment` version, waits for a second infrastructure VM, then
   manually deletes the old CAPI `Machine` to exercise cleanup. It does not
   prove automatic rollout completion based on workload Node readiness.
-- `todo.md` still tracks the missing scale Node readiness/removal,
-  automatic MachineDeployment rollout completion, KubeadmControlPlane upgrade,
-  workload API reachability during upgrade, and full ClusterClass
-  create/ready/delete coverage.
+- Scale, upgrade, and topology workload e2e coverage now exist as
+  independently gated, billable scenarios. Remaining gaps are tracked in the
+  later milestones and roadmap.
 - `templates/clusterclass.yaml` and `templates/cluster-template-topology.yaml`
-  exist, but there is no real-cloud topology e2e scenario in `test/e2e`.
-  `docs/src/usage/clusterclass.md` also states that topology wiring currently
-  lacks the `cloud-provider-stackit` addon wiring needed for Ready Nodes.
+  include topology variables, the development kubeadm package-install fallback,
+  and `cloud-provider-stackit` addon wiring for Ready workload Nodes.
 
 I did not run the billable real-cloud e2e suite for this analysis.
 

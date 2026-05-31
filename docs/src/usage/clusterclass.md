@@ -14,8 +14,9 @@ The ClusterClass wires topology variables into STACKIT templates:
 - Image ID
 - Region
 - Network ID
-- SSH key name
 - Credentials Secret name
+- Additional STACKIT cloud labels
+- Development fallback `preKubeadmCommands`
 
 Apply the ClusterClass:
 
@@ -26,9 +27,14 @@ kubectl apply -f templates/clusterclass.yaml
 Render and apply a topology Cluster:
 
 ```sh
+export KUBERNETES_VERSION=v1.35.3
+export KUBERNETES_APT_REPOSITORY_MINOR=v1.35
+export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < serviceaccount.json | tr -d '\n')"
+export STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.35.3
+
 clusterctl generate cluster "${CLUSTER_NAME}" \
   --from templates/cluster-template-topology.yaml \
-  --kubernetes-version v1.33.12 \
+  --kubernetes-version "${KUBERNETES_VERSION}" \
   --control-plane-machine-count 1 \
   --worker-machine-count 1 \
   > "${CLUSTER_NAME}-topology.yaml"
@@ -40,10 +46,10 @@ The management cluster must run CAPI core and kubeadm-control-plane with
 `ClusterTopology=true`. Otherwise the admission webhooks reject `ClusterClass`,
 `KubeadmControlPlaneTemplate`, and `Cluster.spec.topology`.
 
-The topology template currently covers the infrastructure, control-plane, and
-worker topology wiring only. Unlike the default non-topology
-`templates/cluster-template.yaml`, it does not include the
-`cloud-provider-stackit` `ClusterResourceSet` addon or the workload-cluster
-Secret for the cloud controller manager. Apply equivalent addon wiring before
-expecting topology workload Nodes to become Ready with the external cloud
-provider.
+The topology cluster template includes a `cloud-provider-stackit`
+`ClusterResourceSet` addon and a workload-cluster Secret for the cloud
+controller manager. It also passes the same development fallback
+`preKubeadmCommands` used by the real e2e workload fixture so generic Ubuntu
+images can install `containerd`, `kubelet`, `kubeadm`, and `kubectl` before
+kubeadm runs. For production, prefer kubeadm-ready images and manage addons
+through your normal Helm, GitOps, or addon-provider workflow.

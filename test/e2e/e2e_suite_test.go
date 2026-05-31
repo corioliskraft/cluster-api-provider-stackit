@@ -20,9 +20,11 @@ limitations under the License.
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -110,13 +112,76 @@ func setupCertManager() {
 func setupClusterAPI() {
 	By("installing Cluster API providers")
 	cmd := exec.Command("clusterctl", "init", "--core", "cluster-api", "--bootstrap", "kubeadm", "--control-plane", "kubeadm")
-	cmd.Env = append(os.Environ(), "CLUSTER_RESOURCE_SET=true")
+	cmd.Env = append(os.Environ(), "CLUSTER_RESOURCE_SET=true", "CLUSTER_TOPOLOGY=true")
 	_, err := utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install Cluster API providers")
 
+	ensureClusterTopologyFeatureGate("capi-controller-manager", "capi-system")
+	ensureClusterTopologyFeatureGate("capi-kubeadm-control-plane-controller-manager", "capi-kubeadm-control-plane-system")
 	waitForDeploymentAvailable("capi-controller-manager", "capi-system")
 	waitForDeploymentAvailable("capi-kubeadm-bootstrap-controller-manager", "capi-kubeadm-bootstrap-system")
 	waitForDeploymentAvailable("capi-kubeadm-control-plane-controller-manager", "capi-kubeadm-control-plane-system")
+}
+
+func ensureClusterTopologyFeatureGate(name, namespace string) {
+	By(fmt.Sprintf("ensuring %s/%s has ClusterTopology enabled", namespace, name))
+	cmd := exec.Command("kubectl", "-n", namespace, "get", "deployment", name, "-o", "json")
+	output, err := utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to inspect deployment %s/%s", namespace, name)
+
+	var deployment struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Name string   `json:"name"`
+						Args []string `json:"args"`
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	ExpectWithOffset(1, json.Unmarshal([]byte(output), &deployment)).To(Succeed())
+	ExpectWithOffset(1, deployment.Spec.Template.Spec.Containers).NotTo(BeEmpty(), "Deployment %s/%s has no containers", namespace, name)
+
+	args := append([]string(nil), deployment.Spec.Template.Spec.Containers[0].Args...)
+	changed := false
+	for i, arg := range args {
+		if !strings.HasPrefix(arg, "--feature-gates=") {
+			continue
+		}
+		if strings.Contains(arg, "ClusterTopology=false") {
+			args[i] = strings.ReplaceAll(arg, "ClusterTopology=false", "ClusterTopology=true")
+			changed = true
+		} else if !strings.Contains(arg, "ClusterTopology=true") {
+			args[i] = arg + ",ClusterTopology=true"
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+
+	containerName := deployment.Spec.Template.Spec.Containers[0].Name
+	patch := map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []map[string]any{
+						{
+							"name": containerName,
+							"args": args,
+						},
+					},
+				},
+			},
+		},
+	}
+	patchBytes, err := json.Marshal(patch)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	cmd = exec.Command("kubectl", "-n", namespace, "patch", "deployment", name, "--type=strategic", "-p", string(patchBytes))
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to enable ClusterTopology for deployment %s/%s", namespace, name)
 }
 
 func waitForDeploymentAvailable(name, namespace string) {

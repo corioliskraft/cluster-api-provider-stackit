@@ -530,6 +530,96 @@ var _ = Describe("Manager", Ordered, func() {
 			}, 20*time.Minute, 15*time.Second).Should(Succeed())
 		})
 
+		It("should create a topology workload Cluster with Ready Nodes", func() {
+			if os.Getenv("STACKIT_E2E_TOPOLOGY_WORKLOAD") != "true" {
+				Skip("set STACKIT_E2E_TOPOLOGY_WORKLOAD=true to run the real workload topology e2e test")
+			}
+
+			cfg := stackitVMConfigFromEnv()
+			ctx := context.Background()
+			cloudClient := stackitCloudClientFromCredentialsSecret(ctx, cfg)
+			credentials := stackitCredentialsSecret(ctx, cfg.CredentialsSecretName, cfg.CredentialsSecretNS)
+			serviceAccountJSON, ok := credentials["serviceaccount.json"]
+			Expect(ok).To(BeTrue(), "credentials Secret is missing serviceaccount.json")
+			clusterName := fmt.Sprintf("stackit-e2e-topo-%d", time.Now().Unix())
+			testID := envDefault("STACKIT_E2E_TEST_ID", clusterName)
+			leakTags := stackitE2ETags(testID)
+			kubernetesVersion := envDefault("KUBERNETES_VERSION", defaultKubernetesVersion)
+			validateSupportedKubernetesVersion(kubernetesVersion)
+			observedInstanceIDs := []string{}
+
+			By("cleaning up stale STACKIT resources for the e2e test ID")
+			Expect(cloud.CleanupByTags(ctx, cloudClient, leakTags)).To(Succeed())
+
+			By("applying the STACKIT ClusterClass")
+			clusterClass := renderTopologyClusterClassFixture()
+			clusterClassPath := writeTempManifest("stackit-topology-clusterclass-e2e-*.yaml", clusterClass)
+			cmd := exec.Command("kubectl", "apply", "-n", cfg.Namespace, "-f", clusterClassPath)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply STACKIT ClusterClass")
+
+			By("applying a topology workload Cluster fixture")
+			fixture := renderTopologyWorkloadClusterFixture(topologyWorkloadFixtureOptions{
+				ClusterName:        clusterName,
+				TestID:             testID,
+				Config:             cfg,
+				KubernetesVersion:  kubernetesVersion,
+				ServiceAccountJSON: serviceAccountJSON,
+			})
+			fixturePath := writeTempManifest("stackit-topology-workload-e2e-*.yaml", fixture)
+			var workloadKubeconfig string
+			defer func() {
+				cleanupStackitTopologyClusterFixture(clusterName, cfg.Namespace)
+				cleanupCloudServersByID(ctx, cloudClient, observedInstanceIDs)
+				if err := cloud.CleanupByTags(ctx, cloudClient, leakTags); err != nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "STACKIT API cleanup warning: %v\n", err)
+				}
+				if workloadKubeconfig != "" {
+					_ = os.Remove(workloadKubeconfig)
+				}
+				_ = os.Remove(fixturePath)
+				_ = os.Remove(clusterClassPath)
+			}()
+
+			cmd = exec.Command("kubectl", "apply", "-f", fixturePath)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply STACKIT topology workload fixture")
+
+			waitForKubeadmWorkloadClusterReady(workloadReadinessOptions{
+				Namespace:           cfg.Namespace,
+				ClusterName:         clusterName,
+				TestID:              testID,
+				WantNodes:           2,
+				WantMachines:        2,
+				InstallCNI:          true,
+				WaitForCCM:          true,
+				Topology:            true,
+				ObservedInstanceIDs: &observedInstanceIDs,
+			}, &workloadKubeconfig)
+
+			By("deleting the topology workload Cluster")
+			cmd = exec.Command("kubectl", "delete", "cluster", clusterName, "-n", cfg.Namespace, "--wait=true", "--timeout=45m")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to delete topology workload Cluster")
+
+			By("verifying topology CAPI and infrastructure resources are gone")
+			Eventually(func(g Gomega) {
+				g.Expect(kubectlOutput(g, "get", "machine", "-n", cfg.Namespace, "-l", "cluster.x-k8s.io/cluster-name="+clusterName, "-o", "name")).To(BeEmpty())
+				g.Expect(kubectlOutput(g, "get", "stackitmachine", "-n", cfg.Namespace, "-l", "cluster.x-k8s.io/cluster-name="+clusterName, "-o", "name")).To(BeEmpty())
+				g.Expect(kubectlOutput(g, "get", "stackitcluster", "-n", cfg.Namespace, "-l", "cluster.x-k8s.io/cluster-name="+clusterName, "-o", "name")).To(BeEmpty())
+			}, 10*time.Minute, 15*time.Second).Should(Succeed())
+
+			By("verifying no tagged STACKIT resources remain for the e2e test ID")
+			Eventually(func(g Gomega) {
+				servers, err := cloudClient.ListServersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(servers).To(BeEmpty())
+				loadBalancers, err := cloudClient.ListAPIServerLoadBalancersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(loadBalancers).To(BeEmpty())
+			}, 20*time.Minute, 15*time.Second).Should(Succeed())
+		})
+
 		It("should scale a worker MachineDeployment up and down without STACKIT leaks", func() {
 			if os.Getenv("STACKIT_E2E_SCALE_WORKERS") != "true" {
 				Skip("set STACKIT_E2E_SCALE_WORKERS=true to run the real STACKIT MachineDeployment scale e2e test")
@@ -1233,6 +1323,14 @@ type kubeadmWorkloadFixtureOptions struct {
 	IncludeCCMAddon       bool
 }
 
+type topologyWorkloadFixtureOptions struct {
+	ClusterName        string
+	TestID             string
+	Config             stackitVMConfig
+	KubernetesVersion  string
+	ServiceAccountJSON []byte
+}
+
 type workloadReadinessOptions struct {
 	Namespace           string
 	ClusterName         string
@@ -1241,6 +1339,7 @@ type workloadReadinessOptions struct {
 	WantMachines        int
 	InstallCNI          bool
 	WaitForCCM          bool
+	Topology            bool
 	ObservedInstanceIDs *[]string
 }
 
@@ -1708,6 +1807,37 @@ func renderStackitKubeadmClusterFixture(clusterName, testID string, cfg stackitV
 	})
 }
 
+func renderTopologyClusterClassFixture() string {
+	clusterClass, err := os.ReadFile("templates/clusterclass.yaml")
+	Expect(err).NotTo(HaveOccurred(), "Failed to read topology ClusterClass template")
+	return string(clusterClass)
+}
+
+func renderTopologyWorkloadClusterFixture(opts topologyWorkloadFixtureOptions) string {
+	cfg := opts.Config
+	rendered := renderTemplateFile("templates/cluster-template-topology.yaml",
+		"${CLUSTER_CLASS_NAMESPACE:-${NAMESPACE}}", cfg.Namespace,
+		"${STACKIT_E2E_TEST_ID:-${CLUSTER_NAME}}", opts.TestID,
+		"${STACKIT_E2E_LABEL:-false}", "true",
+		"${CLUSTER_NAME}", opts.ClusterName,
+		"${NAMESPACE}", cfg.Namespace,
+		"${KUBERNETES_VERSION}", opts.KubernetesVersion,
+		"${CONTROL_PLANE_MACHINE_COUNT}", "1",
+		"${WORKER_MACHINE_COUNT}", "1",
+		"${STACKIT_PROJECT_ID}", cfg.ProjectID,
+		"${STACKIT_REGION}", cfg.Region,
+		"${STACKIT_NETWORK_ID}", cfg.NetworkID,
+		"${STACKIT_IMAGE_ID}", cfg.ImageID,
+		"${STACKIT_MACHINE_TYPE}", cfg.MachineType,
+		"${STACKIT_CREDENTIALS_SECRET_NAME}", cfg.CredentialsSecretName,
+		"${KUBERNETES_APT_REPOSITORY_MINOR}", kubernetesAptRepoMinor(opts.KubernetesVersion),
+		"${STACKIT_SERVICE_ACCOUNT_JSON_B64}", base64.StdEncoding.EncodeToString(opts.ServiceAccountJSON),
+		"${STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE}", cloudProviderStackitImageForKubernetesVersion(opts.KubernetesVersion),
+	)
+	Expect(rendered).NotTo(ContainSubstring("${"), "topology workload fixture contains unresolved template variables")
+	return rendered
+}
+
 func renderKubeadmWorkloadClusterFixture(opts kubeadmWorkloadFixtureOptions) string {
 	clusterName := opts.ClusterName
 	testID := opts.TestID
@@ -2084,7 +2214,7 @@ func cleanupStackitClusterFixture(clusterName, namespace string) {
 		{"delete", "cluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=45m"},
 		{"delete", "machine", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name=" + clusterName, "--ignore-not-found", "--wait=true", "--timeout=20m"},
 		{"delete", "stackitmachine", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name=" + clusterName, "--ignore-not-found", "--wait=true", "--timeout=20m"},
-		{"delete", "stackitcluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=10m"},
+		{"delete", "stackitcluster", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name=" + clusterName, "--ignore-not-found", "--wait=true", "--timeout=10m"},
 		{"delete", "secret", clusterName + "-control-plane-0-bootstrap", "-n", namespace, "--ignore-not-found"},
 		{"delete", "secret", clusterName + "-worker-0-bootstrap", "-n", namespace, "--ignore-not-found"},
 	} {
@@ -2134,13 +2264,50 @@ func cleanupStackitKubeadmClusterFixture(clusterName, namespace string) {
 	}
 }
 
+func cleanupStackitTopologyClusterFixture(clusterName, namespace string) {
+	for _, args := range [][]string{
+		{"delete", "cluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=45m"},
+		{"delete", "machine", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name=" + clusterName, "--ignore-not-found", "--wait=true", "--timeout=20m"},
+		{"delete", "stackitmachine", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name=" + clusterName, "--ignore-not-found", "--wait=true", "--timeout=20m"},
+		{"delete", "stackitcluster", clusterName, "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=10m"},
+		{"delete", "clusterresourceset", clusterName + "-cloud-provider-stackit", "-n", namespace, "--ignore-not-found"},
+		{"delete", "secret", clusterName + "-cloud-provider-stackit", "-n", namespace, "--ignore-not-found"},
+		{"delete", "secret", clusterName + "-kubeconfig", "-n", namespace, "--ignore-not-found"},
+		{"delete", "clusterclass", "stackit", "-n", namespace, "--ignore-not-found", "--wait=true", "--timeout=10m"},
+		{"delete", "stackitclustertemplate", "stackit-cluster", "-n", namespace, "--ignore-not-found"},
+		{"delete", "kubeadmcontrolplanetemplate", "stackit-control-plane", "-n", namespace, "--ignore-not-found"},
+		{"delete", "stackitmachinetemplate", "stackit-control-plane", "-n", namespace, "--ignore-not-found"},
+		{"delete", "stackitmachinetemplate", "stackit-default-worker", "-n", namespace, "--ignore-not-found"},
+		{"delete", "kubeadmconfigtemplate", "stackit-default-worker", "-n", namespace, "--ignore-not-found"},
+	} {
+		cmd := exec.Command("kubectl", args...)
+		if _, err := utils.Run(cmd); err != nil {
+			_, _ = fmt.Fprintf(GinkgoWriter, "cleanup warning: %v\n", err)
+		}
+	}
+}
+
 type stackitMachineList struct {
 	Items []stackitMachineItem `json:"items"`
 }
 
-type stackitMachineItem struct {
+type stackitClusterList struct {
+	Items []stackitClusterItem `json:"items"`
+}
+
+type stackitClusterItem struct {
 	Metadata struct {
 		Name string `json:"name"`
+	} `json:"metadata"`
+	Status struct {
+		Ready bool `json:"ready"`
+	} `json:"status"`
+}
+
+type stackitMachineItem struct {
+	Metadata struct {
+		Name   string            `json:"name"`
+		Labels map[string]string `json:"labels"`
 	} `json:"metadata"`
 	Spec struct {
 		AdditionalLabels map[string]string `json:"additionalLabels"`
@@ -2151,6 +2318,21 @@ type stackitMachineItem struct {
 		InstanceID string `json:"instanceID"`
 		ProviderID string `json:"providerID"`
 	} `json:"status"`
+}
+
+func expectNamedStackitClusterReady(g Gomega, namespace, clusterName string) {
+	output := kubectlOutput(g, "get", "stackitcluster", clusterName, "-n", namespace, "-o", "jsonpath={.status.ready}")
+	g.Expect(output).To(Equal("true"))
+}
+
+func expectTopologyStackitClusterReady(g Gomega, namespace, clusterName string) {
+	cmd := exec.Command("kubectl", "get", "stackitclusters", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name="+clusterName, "-o", "json")
+	output, err := utils.Run(cmd)
+	g.Expect(err).NotTo(HaveOccurred())
+	var list stackitClusterList
+	g.Expect(json.Unmarshal([]byte(output), &list)).To(Succeed())
+	g.Expect(list.Items).To(HaveLen(1))
+	g.Expect(list.Items[0].Status.Ready).To(BeTrue(), "StackitCluster %s is not ready", list.Items[0].Metadata.Name)
 }
 
 func stackitMachinesForTestID(g Gomega, namespace, testID string) []stackitMachineItem {
@@ -2363,15 +2545,26 @@ func kubectlOutputWithKubeconfig(g Gomega, kubeconfig string, args ...string) st
 func waitForKubeadmWorkloadClusterReady(opts workloadReadinessOptions, workloadKubeconfig *string) {
 	By("waiting for the StackitCluster to become ready")
 	Eventually(func(g Gomega) {
-		output := kubectlOutput(g, "get", "stackitcluster", opts.ClusterName, "-n", opts.Namespace, "-o", "jsonpath={.status.ready}")
-		g.Expect(output).To(Equal("true"))
+		if opts.Topology {
+			expectTopologyStackitClusterReady(g, opts.Namespace, opts.ClusterName)
+			return
+		}
+		expectNamedStackitClusterReady(g, opts.Namespace, opts.ClusterName)
 	}, 15*time.Minute, 10*time.Second).Should(Succeed())
 
-	By("waiting for the control-plane VM to provision")
-	Eventually(func(g Gomega) {
-		machine := readyStackitMachineByNamePart(g, opts.Namespace, opts.TestID, "control-plane")
-		appendObservedInstanceIDs(opts.ObservedInstanceIDs, machine.Status.InstanceID)
-	}, 45*time.Minute, 15*time.Second).Should(Succeed())
+	if opts.Topology {
+		By("waiting for the topology control-plane VM to provision")
+		Eventually(func(g Gomega) {
+			machine := readyTopologyControlPlaneStackitMachine(g, opts.Namespace, opts.ClusterName, opts.TestID)
+			appendObservedInstanceIDs(opts.ObservedInstanceIDs, machine.Status.InstanceID)
+		}, 45*time.Minute, 15*time.Second).Should(Succeed())
+	} else {
+		By("waiting for the control-plane VM to provision")
+		Eventually(func(g Gomega) {
+			machine := readyStackitMachineByNamePart(g, opts.Namespace, opts.TestID, "control-plane")
+			appendObservedInstanceIDs(opts.ObservedInstanceIDs, machine.Status.InstanceID)
+		}, 45*time.Minute, 15*time.Second).Should(Succeed())
+	}
 
 	By("extracting the workload Cluster kubeconfig")
 	Eventually(func(g Gomega) {
@@ -2621,6 +2814,21 @@ func readyStackitMachines(g Gomega, namespace, testID string, want int) []stacki
 	return machines
 }
 
+func readyTopologyControlPlaneStackitMachine(g Gomega, namespace, clusterName, testID string) stackitMachineItem {
+	machines := stackitMachinesForTestID(g, namespace, testID)
+	var matches []stackitMachineItem
+	for _, machine := range machines {
+		if machine.Metadata.Labels["cluster.x-k8s.io/cluster-name"] == clusterName {
+			if _, ok := machine.Metadata.Labels["cluster.x-k8s.io/control-plane"]; ok {
+				matches = append(matches, machine)
+			}
+		}
+	}
+	g.Expect(matches).To(HaveLen(1), "expected one topology control-plane StackitMachine for cluster %q", clusterName)
+	expectReadyStackitMachine(g, matches[0])
+	return matches[0]
+}
+
 func readyStackitMachineByNamePart(g Gomega, namespace, testID, namePart string) stackitMachineItem {
 	machines := stackitMachinesForTestID(g, namespace, testID)
 	var matches []stackitMachineItem
@@ -2734,6 +2942,12 @@ func writeTempManifest(pattern, content string) string {
 	_, err = file.WriteString(content)
 	Expect(err).NotTo(HaveOccurred(), "Failed to write temporary manifest")
 	return file.Name()
+}
+
+func renderTemplateFile(path string, replacements ...string) string {
+	content, err := os.ReadFile(path)
+	Expect(err).NotTo(HaveOccurred(), "Failed to read template %s", path)
+	return strings.NewReplacer(replacements...).Replace(string(content))
 }
 
 func kubectlOutput(g Gomega, args ...string) string {

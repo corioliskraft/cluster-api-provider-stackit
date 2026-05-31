@@ -62,18 +62,28 @@ spec:
         openAPIV3Schema:
           type: string
           description: STACKIT machine type used by control plane and worker machines.
-    - name: stackitSSHKeyName
-      required: false
-      schema:
-        openAPIV3Schema:
-          type: string
-          description: Existing STACKIT SSH key name injected into machines.
     - name: stackitCredentialsSecretName
       required: true
       schema:
         openAPIV3Schema:
           type: string
           description: Kubernetes Secret name containing STACKIT credentials.
+    - name: stackitAdditionalLabels
+      required: false
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: Additional labels applied to STACKIT cloud resources.
+          additionalProperties:
+            type: string
+    - name: kubeadmPreKubeadmCommands
+      required: false
+      schema:
+        openAPIV3Schema:
+          type: array
+          description: Development fallback commands run before kubeadm to install node runtime packages.
+          items:
+            type: string
   patches:
     - name: stackitProjectID
       definitions:
@@ -181,30 +191,6 @@ spec:
               path: /spec/template/spec/machineType
               valueFrom:
                 variable: stackitMachineType
-    - name: stackitSSHKeyName
-      definitions:
-        - selector:
-            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
-            kind: StackitMachineTemplate
-            matchResources:
-              controlPlane: true
-          jsonPatches:
-            - op: replace
-              path: /spec/template/spec/sshKeyName
-              valueFrom:
-                variable: stackitSSHKeyName
-        - selector:
-            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
-            kind: StackitMachineTemplate
-            matchResources:
-              machineDeploymentClass:
-                names:
-                  - default-worker
-          jsonPatches:
-            - op: replace
-              path: /spec/template/spec/sshKeyName
-              valueFrom:
-                variable: stackitSSHKeyName
     - name: stackitCredentialsSecretName
       definitions:
         - selector:
@@ -217,6 +203,64 @@ spec:
               path: /spec/template/spec/credentialsSecretRef/name
               valueFrom:
                 variable: stackitCredentialsSecretName
+    - name: stackitAdditionalLabels
+      definitions:
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitClusterTemplate
+            matchResources:
+              infrastructureCluster: true
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/additionalLabels
+              valueFrom:
+                variable: stackitAdditionalLabels
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitMachineTemplate
+            matchResources:
+              controlPlane: true
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/additionalLabels
+              valueFrom:
+                variable: stackitAdditionalLabels
+        - selector:
+            apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+            kind: StackitMachineTemplate
+            matchResources:
+              machineDeploymentClass:
+                names:
+                  - default-worker
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/additionalLabels
+              valueFrom:
+                variable: stackitAdditionalLabels
+    - name: kubeadmPreKubeadmCommands
+      definitions:
+        - selector:
+            apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+            kind: KubeadmControlPlaneTemplate
+            matchResources:
+              controlPlane: true
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/kubeadmConfigSpec/preKubeadmCommands
+              valueFrom:
+                variable: kubeadmPreKubeadmCommands
+        - selector:
+            apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+            kind: KubeadmConfigTemplate
+            matchResources:
+              machineDeploymentClass:
+                names:
+                  - default-worker
+          jsonPatches:
+            - op: replace
+              path: /spec/template/spec/preKubeadmCommands
+              valueFrom:
+                variable: kubeadmPreKubeadmCommands
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
 kind: StackitClusterTemplate
@@ -227,6 +271,7 @@ spec:
     spec:
       projectID: 00000000-0000-0000-0000-000000000000
       region: eu01
+      additionalLabels: {}
       credentialsSecretRef:
         name: stackit-credentials
       network:
@@ -242,6 +287,8 @@ spec:
   template:
     spec:
       kubeadmConfigSpec:
+        preKubeadmCommands:
+          - "true"
         initConfiguration:
           nodeRegistration:
             name: "{{ ds.meta_data.local_hostname }}"
@@ -257,10 +304,6 @@ spec:
               - name: cloud-provider
                 value: external
         clusterConfiguration:
-          apiServer:
-            extraArgs:
-              - name: cloud-provider
-                value: external
           controllerManager:
             extraArgs:
               - name: cloud-provider
@@ -273,9 +316,9 @@ metadata:
 spec:
   template:
     spec:
+      additionalLabels: {}
       imageID: 00000000-0000-0000-0000-000000000000
       machineType: c2i.2
-      sshKeyName: ""
       rootVolume:
         sizeGiB: 50
         performanceClass: storage_premium_perf6
@@ -290,9 +333,9 @@ metadata:
 spec:
   template:
     spec:
+      additionalLabels: {}
       imageID: 00000000-0000-0000-0000-000000000000
       machineType: c2i.2
-      sshKeyName: ""
       rootVolume:
         sizeGiB: 50
         performanceClass: storage_premium_perf6
@@ -307,6 +350,8 @@ metadata:
 spec:
   template:
     spec:
+      preKubeadmCommands:
+        - "true"
       joinConfiguration:
         nodeRegistration:
           name: "{{ ds.meta_data.local_hostname }}"

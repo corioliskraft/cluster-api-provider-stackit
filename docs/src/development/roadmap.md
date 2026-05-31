@@ -14,14 +14,15 @@ Done or mostly done:
 - e2e leak cleanup support
 - worker scale coverage
 - worker replacement upgrade coverage
+- control-plane replacement upgrade coverage
 - failure domain publication
 - ClusterClass templates
 - 1 control-plane / 1 worker workload-cluster NodeRef and Node readiness e2e
+- ClusterClass topology create/ready/delete e2e
 
 Open work:
 
-- worker scale Node readiness/removal with `cloud-provider-stackit`
-- automatic upgrade rollout and control-plane upgrade readiness with real Nodes
-- full ClusterClass create/ready/delete e2e
+- highly available control-plane upgrade readiness with real Nodes
+- highly available ClusterClass topology e2e
 - release/distribution decision
 - broader production hardening

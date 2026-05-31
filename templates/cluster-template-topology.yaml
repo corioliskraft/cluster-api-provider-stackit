@@ -3,6 +3,9 @@ kind: Cluster
 metadata:
   name: ${CLUSTER_NAME}
   namespace: ${NAMESPACE}
+  labels:
+    cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
+    cluster-api-provider-stackit/cloud-provider-stackit: "true"
 spec:
   clusterNetwork:
     pods:
@@ -34,7 +37,251 @@ spec:
         value: ${STACKIT_IMAGE_ID}
       - name: stackitMachineType
         value: ${STACKIT_MACHINE_TYPE}
-      - name: stackitSSHKeyName
-        value: "${STACKIT_SSH_KEY_NAME}"
       - name: stackitCredentialsSecretName
         value: ${STACKIT_CREDENTIALS_SECRET_NAME}
+      - name: stackitAdditionalLabels
+        value:
+          cluster-api-provider-stackit/e2e: "${STACKIT_E2E_LABEL:-false}"
+          cluster-api-provider-stackit/test-id: "${STACKIT_E2E_TEST_ID:-${CLUSTER_NAME}}"
+      - name: kubeadmPreKubeadmCommands
+        value:
+          - |
+            set -eu
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y apt-transport-https ca-certificates conntrack curl gpg containerd
+            install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://pkgs.k8s.io/core:/stable:/${KUBERNETES_APT_REPOSITORY_MINOR}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+            chmod 0644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+            echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KUBERNETES_APT_REPOSITORY_MINOR}/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+            apt-get update
+            apt-get install -y kubelet kubeadm kubectl
+            apt-mark hold kubelet kubeadm kubectl
+            mkdir -p /etc/containerd
+            containerd config default > /etc/containerd/config.toml
+            sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+            systemctl restart containerd
+            modprobe br_netfilter
+            printf 'net.bridge.bridge-nf-call-iptables=1\nnet.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-kubernetes-cri.conf
+            sysctl --system
+            (journalctl -fu kubelet --no-pager > /dev/console 2>&1 &)
+---
+apiVersion: addons.cluster.x-k8s.io/v1beta2
+kind: ClusterResourceSet
+metadata:
+  name: ${CLUSTER_NAME}-cloud-provider-stackit
+  namespace: ${NAMESPACE}
+spec:
+  strategy: Reconcile
+  clusterSelector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
+      cluster-api-provider-stackit/cloud-provider-stackit: "true"
+  resources:
+    - kind: Secret
+      name: ${CLUSTER_NAME}-cloud-provider-stackit
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${CLUSTER_NAME}-cloud-provider-stackit
+  namespace: ${NAMESPACE}
+type: addons.cluster.x-k8s.io/resource-set
+stringData:
+  cloud-provider-stackit.yaml: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: kube-system
+    ---
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: stackit-cloud-controller-manager
+      namespace: kube-system
+    ---
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: stackit-cloud-config
+      namespace: kube-system
+    data:
+      cloud.yaml: |
+        global:
+          projectId: ${STACKIT_PROJECT_ID}
+          region: ${STACKIT_REGION}
+        loadBalancer:
+          networkId: ${STACKIT_NETWORK_ID}
+    ---
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: stackit-cloud-secret
+      namespace: kube-system
+    type: Opaque
+    data:
+      sa_key.json: ${STACKIT_SERVICE_ACCOUNT_JSON_B64}
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: stackit-cloud-controller-manager
+    rules:
+      - apiGroups:
+          - coordination.k8s.io
+        resources:
+          - leases
+        verbs:
+          - get
+          - create
+          - update
+      - apiGroups:
+          - ""
+        resources:
+          - events
+        verbs:
+          - create
+          - patch
+          - update
+      - apiGroups:
+          - ""
+        resources:
+          - nodes
+        verbs:
+          - "*"
+      - apiGroups:
+          - ""
+        resources:
+          - nodes/status
+        verbs:
+          - patch
+      - apiGroups:
+          - ""
+        resources:
+          - services
+        verbs:
+          - list
+          - patch
+          - update
+          - watch
+      - apiGroups:
+          - ""
+        resources:
+          - services/status
+        verbs:
+          - patch
+      - apiGroups:
+          - ""
+        resources:
+          - serviceaccounts/token
+        verbs:
+          - create
+      - apiGroups:
+          - ""
+        resources:
+          - serviceaccounts
+        verbs:
+          - create
+          - get
+      - apiGroups:
+          - ""
+        resources:
+          - configmaps
+        verbs:
+          - get
+          - list
+          - watch
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: stackit-cloud-controller-manager
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: stackit-cloud-controller-manager
+    subjects:
+      - kind: ServiceAccount
+        name: stackit-cloud-controller-manager
+        namespace: kube-system
+    ---
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: stackit-cloud-controller-manager
+      namespace: kube-system
+      labels:
+        app: stackit-cloud-controller-manager
+    spec:
+      replicas: 1
+      strategy:
+        type: RollingUpdate
+      selector:
+        matchLabels:
+          app: stackit-cloud-controller-manager
+      template:
+        metadata:
+          labels:
+            app: stackit-cloud-controller-manager
+        spec:
+          serviceAccountName: stackit-cloud-controller-manager
+          dnsPolicy: Default
+          terminationGracePeriodSeconds: 30
+          tolerations:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+              effect: NoSchedule
+            - key: node-role.kubernetes.io/master
+              operator: Exists
+              effect: NoSchedule
+            - key: node.cloudprovider.kubernetes.io/uninitialized
+              operator: Exists
+              effect: NoSchedule
+            - key: node.kubernetes.io/not-ready
+              operator: Exists
+            - key: node.kubernetes.io/unreachable
+              operator: Exists
+          containers:
+            - name: stackit-cloud-controller-manager
+              image: ${STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE}
+              args:
+                - --cloud-provider=stackit
+                - --webhook-secure-port=0
+                - --concurrent-service-syncs=3
+                - --controllers=cloud-node-controller,cloud-node-lifecycle-controller,service-lb-controller
+                - --authorization-always-allow-paths=/metrics
+                - --leader-elect=true
+                - --leader-elect-resource-name=stackit-cloud-controller-manager
+                - --cloud-config=/etc/config/cloud.yaml
+                - --cluster-name=${CLUSTER_NAME}
+              env:
+                - name: STACKIT_SERVICE_ACCOUNT_KEY_PATH
+                  value: /etc/serviceaccount/sa_key.json
+              ports:
+                - containerPort: 10258
+                  name: https
+                  protocol: TCP
+                - containerPort: 9090
+                  name: metrics
+                  protocol: TCP
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 500Mi
+                requests:
+                  cpu: 100m
+                  memory: 100Mi
+              volumeMounts:
+                - mountPath: /etc/config
+                  name: cloud-config
+                  readOnly: true
+                - mountPath: /etc/serviceaccount
+                  name: cloud-secret
+                  readOnly: true
+          volumes:
+            - name: cloud-config
+              configMap:
+                name: stackit-cloud-config
+            - name: cloud-secret
+              secret:
+                secretName: stackit-cloud-secret

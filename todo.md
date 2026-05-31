@@ -105,7 +105,7 @@
 - [ ] PR 9: Add ClusterClass support.
   - [x] Add ClusterClass and topology templates after create/delete, scale, and upgrade flows are stable.
   - [x] Wire Kubernetes version, control-plane replicas, worker replicas, machine type, image ID, region, network ID, SSH key name, and credentials secret through topology variables.
-  - [ ] Verify full ClusterClass create/ready/delete flow once workload-cluster bootstrap and node readiness are enabled.
+  - [x] Verify full ClusterClass create/ready/delete flow once workload-cluster bootstrap and node readiness are enabled.
 - [ ] PR 10: Enable ClusterTopology validation for local clusterctl installs.
   - [x] Enable the CAPI `ClusterTopology` feature gate in the local clusterctl configuration.
   - [x] Re-run the ClusterClass apply flow against a management cluster with `ClusterTopology=true`.

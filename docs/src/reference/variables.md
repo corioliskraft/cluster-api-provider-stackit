@@ -18,6 +18,7 @@ Common clusterctl variables:
 | `STACKIT_CREDENTIALS_SECRET_NAME` | Kubernetes Secret with STACKIT credentials |
 | `STACKIT_SERVICE_ACCOUNT_JSON_B64` | Base64-encoded STACKIT service account JSON for the workload-cluster cloud controller manager Secret |
 | `STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE` | `cloud-provider-stackit` image. The image tag minor must match `KUBERNETES_VERSION` |
+| `KUBERNETES_APT_REPOSITORY_MINOR` | Kubernetes package repository minor used by topology development fallback `preKubeadmCommands`, for example `v1.35` |
 | `CLUSTER_CLASS_NAMESPACE` | Namespace containing the ClusterClass |
 
 Optional workload CNI helper variables:

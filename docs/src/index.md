@@ -26,13 +26,13 @@ Working areas:
 - Provider IDs match `cloud-provider-stackit`: `stackit://<server-id>`.
 - `clusterctl` local release packaging is available.
 - Real STACKIT VM e2e scenarios exist behind opt-in flags.
-- Worker scale, upgrade replacement, failure domains, and ClusterClass templates
+- Worker scale, upgrade replacement, failure domains, and ClusterClass topology
   have focused coverage or validation.
 
 Known gaps:
 
-- Full workload-cluster Node readiness is covered for the 1 control-plane / 1
-  worker NodeRef e2e path, but broader scale, upgrade, and ClusterClass
-  readiness coverage is still pending.
-- Full ClusterClass create/ready/delete e2e is still pending.
+- Full workload-cluster Node readiness is covered for create/delete, worker
+  scale, worker and control-plane upgrade, and ClusterClass topology e2e paths.
+- Highly available control-plane upgrade and topology variants are still
+  pending.
 - Release distribution is not finalized between installer YAML, Helm, or both.

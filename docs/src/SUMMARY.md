@@ -40,6 +40,7 @@
 - [Roadmap](development/roadmap.md)
 - [PR Plan](development/pr-plan.md)
 - [Release Packaging](development/release-packaging.md)
+- [Cloud Resource Management](development/cloud-resource-management.md)
 
 # Reference
 

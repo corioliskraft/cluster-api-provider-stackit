@@ -659,6 +659,167 @@ var _ = Describe("Manager", Ordered, func() {
 			}, 20*time.Minute, 15*time.Second).Should(Succeed())
 		})
 
+		It("should scale workload worker Nodes up and down without STACKIT leaks", func() {
+			if os.Getenv("STACKIT_E2E_SCALE_WORKLOAD") != "true" {
+				Skip("set STACKIT_E2E_SCALE_WORKLOAD=true to run the real workload MachineDeployment scale e2e test")
+			}
+
+			cfg := stackitVMConfigFromEnv()
+			ctx := context.Background()
+			cloudClient := stackitCloudClientFromCredentialsSecret(ctx, cfg)
+			credentials := stackitCredentialsSecret(ctx, cfg.CredentialsSecretName, cfg.CredentialsSecretNS)
+			serviceAccountJSON, ok := credentials["serviceaccount.json"]
+			Expect(ok).To(BeTrue(), "credentials Secret is missing serviceaccount.json")
+			clusterName := fmt.Sprintf("stackit-e2e-wscale-%d", time.Now().Unix())
+			testID := envDefault("STACKIT_E2E_TEST_ID", clusterName)
+			leakTags := stackitE2ETags(testID)
+			machineDeploymentName := clusterName + "-md-0"
+			kubernetesVersion := envDefault("KUBERNETES_VERSION", defaultKubernetesVersion)
+			validateSupportedKubernetesVersion(kubernetesVersion)
+			observedInstanceIDs := []string{}
+
+			By("cleaning up stale STACKIT resources for the e2e test ID")
+			Expect(cloud.CleanupByTags(ctx, cloudClient, leakTags)).To(Succeed())
+
+			By("applying a real kubeadm workload Cluster fixture for scale")
+			fixture := renderKubeadmWorkloadClusterFixture(kubeadmWorkloadFixtureOptions{
+				ClusterName:           clusterName,
+				TestID:                testID,
+				Config:                cfg,
+				KubernetesVersion:     kubernetesVersion,
+				ServiceAccountJSON:    serviceAccountJSON,
+				ControlPlaneReplicas:  1,
+				WorkerReplicas:        1,
+				APIServerLoadBalancer: true,
+				IncludeCCMAddon:       true,
+			})
+			fixturePath := writeTempManifest("stackit-scale-workload-e2e-*.yaml", fixture)
+			var workloadKubeconfig string
+			defer func() {
+				cleanupStackitKubeadmClusterFixture(clusterName, cfg.Namespace)
+				cleanupCloudServersByID(ctx, cloudClient, observedInstanceIDs)
+				if err := cloud.CleanupByTags(ctx, cloudClient, leakTags); err != nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "STACKIT API cleanup warning: %v\n", err)
+				}
+				if workloadKubeconfig != "" {
+					_ = os.Remove(workloadKubeconfig)
+				}
+				_ = os.Remove(fixturePath)
+			}()
+
+			cmd := exec.Command("kubectl", "apply", "-f", fixturePath)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply STACKIT workload scale fixture")
+
+			waitForKubeadmWorkloadClusterReady(workloadReadinessOptions{
+				Namespace:           cfg.Namespace,
+				ClusterName:         clusterName,
+				TestID:              testID,
+				WantNodes:           2,
+				WantMachines:        2,
+				InstallCNI:          true,
+				WaitForCCM:          true,
+				ObservedInstanceIDs: &observedInstanceIDs,
+			}, &workloadKubeconfig)
+
+			var initialWorkerNodeNames []string
+			Eventually(func(g Gomega) {
+				expectMachineDeploymentReadyReplicas(g, cfg.Namespace, machineDeploymentName, 1)
+				workers := workerMachinesForDeployment(g, cfg.Namespace, clusterName, machineDeploymentName)
+				g.Expect(workers).To(HaveLen(1))
+				expectWorkloadNodesReadyForMachines(g, workloadKubeconfig, workers)
+				initialWorkerNodeNames = nodeNamesForMachines(workers)
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
+			Expect(initialWorkerNodeNames).To(HaveLen(1))
+
+			By("scaling workload workers up to three replicas")
+			cmd = exec.Command("kubectl", "scale", "machinedeployment", machineDeploymentName, "-n", cfg.Namespace, "--replicas=3")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to scale workload MachineDeployment up")
+
+			var scaledUpInstanceIDs []string
+			var scaledUpWorkerNodeNames []string
+			Eventually(func(g Gomega) {
+				expectMachineDeploymentReadyReplicas(g, cfg.Namespace, machineDeploymentName, 3)
+				machines := readyStackitMachines(g, cfg.Namespace, testID, 4)
+				scaledUpInstanceIDs = instanceIDs(machines)
+				workers := workerMachinesForDeployment(g, cfg.Namespace, clusterName, machineDeploymentName)
+				g.Expect(workers).To(HaveLen(3))
+				expectWorkloadNodesReadyForMachines(g, workloadKubeconfig, workers)
+				expectWorkloadNodesReady(g, workloadKubeconfig, 4)
+				scaledUpWorkerNodeNames = nodeNamesForMachines(workers)
+			}, 45*time.Minute, 15*time.Second).Should(Succeed())
+			observedInstanceIDs = appendUnique(observedInstanceIDs, scaledUpInstanceIDs...)
+			Expect(scaledUpWorkerNodeNames).To(HaveLen(3))
+			for _, nodeName := range initialWorkerNodeNames {
+				Expect(scaledUpWorkerNodeNames).To(ContainElement(nodeName))
+			}
+
+			By("verifying all scaled-up workload VMs exist in STACKIT")
+			for _, instanceID := range scaledUpInstanceIDs {
+				instanceID := instanceID
+				Eventually(func(g Gomega) {
+					server, err := cloudClient.GetServer(ctx, instanceID)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(server.ID).To(Equal(instanceID))
+				}, 5*time.Minute, 15*time.Second).Should(Succeed())
+			}
+
+			By("scaling workload workers back down to one replica")
+			cmd = exec.Command("kubectl", "scale", "machinedeployment", machineDeploymentName, "-n", cfg.Namespace, "--replicas=1")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to scale workload MachineDeployment down")
+
+			var remainingInstanceIDs []string
+			var remainingWorkerNodeNames []string
+			Eventually(func(g Gomega) {
+				expectMachineDeploymentReadyReplicas(g, cfg.Namespace, machineDeploymentName, 1)
+				machines := readyStackitMachines(g, cfg.Namespace, testID, 2)
+				remainingInstanceIDs = instanceIDs(machines)
+				workers := workerMachinesForDeployment(g, cfg.Namespace, clusterName, machineDeploymentName)
+				g.Expect(workers).To(HaveLen(1))
+				expectWorkloadNodesReadyForMachines(g, workloadKubeconfig, workers)
+				expectWorkloadNodesReady(g, workloadKubeconfig, 2)
+				remainingWorkerNodeNames = nodeNamesForMachines(workers)
+			}, 30*time.Minute, 15*time.Second).Should(Succeed())
+			observedInstanceIDs = appendUnique(observedInstanceIDs, remainingInstanceIDs...)
+
+			removedWorkerNodeNames := difference(scaledUpWorkerNodeNames, remainingWorkerNodeNames)
+			Expect(removedWorkerNodeNames).To(HaveLen(2))
+
+			By("verifying scaled-down workload Nodes were removed")
+			Eventually(func(g Gomega) {
+				expectWorkloadNodesGone(g, workloadKubeconfig, removedWorkerNodeNames)
+			}, 10*time.Minute, 15*time.Second).Should(Succeed())
+
+			deletedInstanceIDs := difference(scaledUpInstanceIDs, remainingInstanceIDs)
+			Expect(deletedInstanceIDs).To(HaveLen(2))
+
+			By("verifying scaled-down workload VMs were deleted from STACKIT")
+			for _, instanceID := range deletedInstanceIDs {
+				instanceID := instanceID
+				Eventually(func(g Gomega) {
+					_, err := cloudClient.GetServer(ctx, instanceID)
+					g.Expect(cloud.IsNotFound(err)).To(BeTrue(), "expected server %s to be deleted, got %v", instanceID, err)
+				}, 20*time.Minute, 15*time.Second).Should(Succeed())
+			}
+
+			By("deleting the workload scale Cluster")
+			cmd = exec.Command("kubectl", "delete", "cluster", clusterName, "-n", cfg.Namespace, "--wait=true", "--timeout=45m")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to delete workload scale Cluster")
+
+			By("verifying no tagged STACKIT resources remain for the e2e test ID")
+			Eventually(func(g Gomega) {
+				servers, err := cloudClient.ListServersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(servers).To(BeEmpty())
+				loadBalancers, err := cloudClient.ListAPIServerLoadBalancersByTags(ctx, leakTags)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(loadBalancers).To(BeEmpty())
+			}, 20*time.Minute, 15*time.Second).Should(Succeed())
+		})
+
 		It("should replace worker VMs during a MachineDeployment version upgrade without STACKIT leaks", func() {
 			if os.Getenv("STACKIT_E2E_UPGRADE_WORKERS") != "true" {
 				Skip("set STACKIT_E2E_UPGRADE_WORKERS=true to run the real STACKIT MachineDeployment upgrade e2e test")
@@ -1749,7 +1910,8 @@ type capiMachineList struct {
 
 type capiMachineItem struct {
 	Metadata struct {
-		Name string `json:"name"`
+		Name   string            `json:"name"`
+		Labels map[string]string `json:"labels"`
 	} `json:"metadata"`
 	Spec struct {
 		ProviderID        *string `json:"providerID"`
@@ -1766,6 +1928,13 @@ type capiMachineItem struct {
 	} `json:"status"`
 }
 
+type machineDeploymentItem struct {
+	Status struct {
+		Replicas      int `json:"replicas"`
+		ReadyReplicas int `json:"readyReplicas"`
+	} `json:"status"`
+}
+
 func expectCAPIMachinesWithProviderIDs(g Gomega, namespace, clusterName string, want int) {
 	cmd := exec.Command("kubectl", "get", "machines", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name="+clusterName, "-o", "json")
 	output, err := utils.Run(cmd)
@@ -1777,6 +1946,27 @@ func expectCAPIMachinesWithProviderIDs(g Gomega, namespace, clusterName string, 
 		g.Expect(machine.Spec.ProviderID).NotTo(BeNil(), "Machine %s has no providerID", machine.Metadata.Name)
 		g.Expect(*machine.Spec.ProviderID).To(HavePrefix("stackit://"), "Machine %s has unexpected providerID", machine.Metadata.Name)
 	}
+}
+
+func expectMachineDeploymentReadyReplicas(g Gomega, namespace, name string, replicas int) {
+	cmd := exec.Command("kubectl", "get", "machinedeployment", name, "-n", namespace, "-o", "json")
+	output, err := utils.Run(cmd)
+	g.Expect(err).NotTo(HaveOccurred())
+	var machineDeployment machineDeploymentItem
+	g.Expect(json.Unmarshal([]byte(output), &machineDeployment)).To(Succeed())
+	g.Expect(machineDeployment.Status.Replicas).To(Equal(replicas), "MachineDeployment %s has unexpected replicas", name)
+	g.Expect(machineDeployment.Status.ReadyReplicas).To(Equal(replicas), "MachineDeployment %s has unexpected readyReplicas", name)
+}
+
+func workerMachinesForDeployment(g Gomega, namespace, clusterName, deploymentName string) []capiMachineItem {
+	machines := capiMachinesForCluster(g, namespace, clusterName)
+	out := []capiMachineItem{}
+	for _, machine := range machines {
+		if machine.Metadata.Labels["cluster.x-k8s.io/deployment-name"] == deploymentName {
+			out = append(out, machine)
+		}
+	}
+	return out
 }
 
 type workloadNodeList struct {
@@ -1993,6 +2183,41 @@ func expectProviderIDNodeRefAlignment(g Gomega, namespace, clusterName, testID, 
 		g.Expect(ok).To(BeTrue(), "Node %s referenced by Machine %s not found", machine.Status.NodeRef.Name, machine.Metadata.Name)
 		g.Expect(node.Spec.ProviderID).To(Equal(stackitMachine.Status.ProviderID), "Node %s providerID does not match Machine %s", node.Metadata.Name, machine.Metadata.Name)
 	}
+}
+
+func expectWorkloadNodesReadyForMachines(g Gomega, kubeconfig string, machines []capiMachineItem) {
+	nodes := map[string]workloadNodeItem{}
+	for _, node := range workloadNodes(g, kubeconfig) {
+		nodes[node.Metadata.Name] = node
+	}
+
+	for _, machine := range machines {
+		g.Expect(machine.Spec.ProviderID).NotTo(BeNil(), "Machine %s has no providerID", machine.Metadata.Name)
+		g.Expect(machine.Status.NodeRef.Name).NotTo(BeEmpty(), "Machine %s has no status.nodeRef.name", machine.Metadata.Name)
+		node, ok := nodes[machine.Status.NodeRef.Name]
+		g.Expect(ok).To(BeTrue(), "Node %s referenced by Machine %s not found", machine.Status.NodeRef.Name, machine.Metadata.Name)
+		g.Expect(node.Spec.ProviderID).To(Equal(*machine.Spec.ProviderID), "Node %s providerID does not match Machine %s", node.Metadata.Name, machine.Metadata.Name)
+		g.Expect(nodeReady(node)).To(BeTrue(), "Node %s is not Ready", node.Metadata.Name)
+	}
+}
+
+func expectWorkloadNodesGone(g Gomega, kubeconfig string, nodeNames []string) {
+	nodes := map[string]workloadNodeItem{}
+	for _, node := range workloadNodes(g, kubeconfig) {
+		nodes[node.Metadata.Name] = node
+	}
+	for _, nodeName := range nodeNames {
+		_, ok := nodes[nodeName]
+		g.Expect(ok).To(BeFalse(), "Node %s still exists", nodeName)
+	}
+}
+
+func nodeNamesForMachines(machines []capiMachineItem) []string {
+	out := make([]string, 0, len(machines))
+	for _, machine := range machines {
+		out = append(out, machine.Status.NodeRef.Name)
+	}
+	return out
 }
 
 func capiMachinesForCluster(g Gomega, namespace, clusterName string) []capiMachineItem {

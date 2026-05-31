@@ -477,14 +477,14 @@ Acceptance criteria:
 - The test can be executed independently from non-topology create/delete,
   scale, and upgrade tests.
 
-Suggested command:
+Required billable validation:
 
 ```sh
 env STACKIT_E2E_TOPOLOGY_WORKLOAD=true \
   KUBERNETES_VERSION=v1.35.3 \
   STACKIT_E2E_CNI=cilium \
-  go test -tags=e2e ./test/e2e -v -ginkgo.v \
-  --ginkgo.focus='topology.*workload'
+  go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+  --ginkgo.focus='topology.*workload' --ginkgo.timeout=90m
 ```
 
 ## Milestone 6: Documentation and CI Wiring

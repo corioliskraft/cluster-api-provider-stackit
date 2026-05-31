@@ -325,14 +325,16 @@ Acceptance criteria:
 - Scale-up proves new workload Nodes become Ready.
 - Scale-down proves removed worker Nodes and VMs are gone.
 - Cleanup succeeds when the test fails after cluster creation.
+- The billable real-cloud validation below passes before the milestone is
+  marked complete.
 
-Suggested command:
+Required billable validation:
 
 ```sh
 env STACKIT_E2E_SCALE_WORKLOAD=true \
   KUBERNETES_VERSION=v1.35.3 \
   STACKIT_E2E_CNI=cilium \
-  go test -tags=e2e ./test/e2e -v -ginkgo.v \
+  go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
   --ginkgo.focus='scale.*workload'
 ```
 

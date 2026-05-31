@@ -503,46 +503,16 @@ var _ = Describe("Manager", Ordered, func() {
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to apply STACKIT NodeRef fixture")
 
-			By("waiting for the StackitCluster to become ready")
-			Eventually(func(g Gomega) {
-				output := kubectlOutput(g, "get", "stackitcluster", clusterName, "-n", cfg.Namespace, "-o", "jsonpath={.status.ready}")
-				g.Expect(output).To(Equal("true"))
-			}, 15*time.Minute, 10*time.Second).Should(Succeed())
-
-			By("waiting for the control-plane VM to provision")
-			Eventually(func(g Gomega) {
-				machine := readyStackitMachineByNamePart(g, cfg.Namespace, testID, "control-plane")
-				observedInstanceIDs = appendUnique(observedInstanceIDs, machine.Status.InstanceID)
-			}, 45*time.Minute, 15*time.Second).Should(Succeed())
-
-			By("extracting the workload Cluster kubeconfig")
-			Eventually(func(g Gomega) {
-				workloadKubeconfig = workloadKubeconfigFromSecret(g, clusterName, cfg.Namespace)
-				output := kubectlOutputWithKubeconfig(g, workloadKubeconfig, "get", "ns", "kube-system", "-o", "name")
-				g.Expect(output).To(Equal("namespace/kube-system"))
-			}, 20*time.Minute, 15*time.Second).Should(Succeed())
-
-			By("installing CNI into the workload Cluster")
-			installWorkloadCNI(workloadKubeconfig)
-
-			By("waiting for embedded cloud-provider-stackit rollout")
-			waitForWorkloadCCMRollout(workloadKubeconfig)
-
-			By("waiting for one control-plane and one worker VM to provision")
-			Eventually(func(g Gomega) {
-				machines := readyStackitMachines(g, cfg.Namespace, testID, 2)
-				observedInstanceIDs = appendUnique(observedInstanceIDs, instanceIDs(machines)...)
-			}, 45*time.Minute, 15*time.Second).Should(Succeed())
-
-			By("waiting for workload Nodes to be Ready")
-			Eventually(func(g Gomega) {
-				expectWorkloadNodesReady(g, workloadKubeconfig, 2)
-			}, 25*time.Minute, 15*time.Second).Should(Succeed())
-
-			By("verifying CAPI Machines reference Nodes with matching STACKIT providerIDs")
-			Eventually(func(g Gomega) {
-				expectProviderIDNodeRefAlignment(g, cfg.Namespace, clusterName, testID, workloadKubeconfig, 2)
-			}, 15*time.Minute, 10*time.Second).Should(Succeed())
+			waitForKubeadmWorkloadClusterReady(workloadReadinessOptions{
+				Namespace:           cfg.Namespace,
+				ClusterName:         clusterName,
+				TestID:              testID,
+				WantNodes:           2,
+				WantMachines:        2,
+				InstallCNI:          true,
+				WaitForCCM:          true,
+				ObservedInstanceIDs: &observedInstanceIDs,
+			}, &workloadKubeconfig)
 
 			By("deleting the workload Cluster")
 			cmd = exec.Command("kubectl", "delete", "cluster", clusterName, "-n", cfg.Namespace, "--wait=true", "--timeout=45m")
@@ -577,10 +547,10 @@ var _ = Describe("Manager", Ordered, func() {
 			By("cleaning up stale STACKIT resources for the e2e test ID")
 			Expect(cloud.CleanupByTags(ctx, cloudClient, leakTags)).To(Succeed())
 
-			By("applying a worker MachineDeployment scale fixture")
+			By("applying an infra-only worker MachineDeployment scale fixture")
 			kubernetesVersion := envDefault("KUBERNETES_VERSION", defaultKubernetesVersion)
 			validateSupportedKubernetesVersion(kubernetesVersion)
-			fixture := renderStackitMachineDeploymentScaleFixture(clusterName, testID, cfg, kubernetesVersion)
+			fixture := renderStackitInfraOnlyMachineDeploymentFixture(clusterName, testID, cfg, kubernetesVersion)
 			fixturePath := writeTempManifest("stackit-md-scale-e2e-*.yaml", fixture)
 			defer func() {
 				cleanupStackitMachineDeploymentScaleFixture(clusterName, cfg.Namespace)
@@ -710,8 +680,8 @@ var _ = Describe("Manager", Ordered, func() {
 			By("cleaning up stale STACKIT resources for the e2e test ID")
 			Expect(cloud.CleanupByTags(ctx, cloudClient, leakTags)).To(Succeed())
 
-			By("applying a worker MachineDeployment upgrade fixture")
-			fixture := renderStackitMachineDeploymentScaleFixture(clusterName, testID, cfg, upgradeFrom)
+			By("applying an infra-only worker MachineDeployment upgrade fixture")
+			fixture := renderStackitInfraOnlyMachineDeploymentFixture(clusterName, testID, cfg, upgradeFrom)
 			fixturePath := writeTempManifest("stackit-md-upgrade-e2e-*.yaml", fixture)
 			defer func() {
 				cleanupStackitMachineDeploymentScaleFixture(clusterName, cfg.Namespace)
@@ -824,6 +794,29 @@ type stackitVMConfig struct {
 	CredentialsSecretNS   string
 	RootVolumeSizeGiB     string
 	RootVolumePerformance string
+}
+
+type kubeadmWorkloadFixtureOptions struct {
+	ClusterName           string
+	TestID                string
+	Config                stackitVMConfig
+	KubernetesVersion     string
+	ServiceAccountJSON    []byte
+	ControlPlaneReplicas  int
+	WorkerReplicas        int
+	APIServerLoadBalancer bool
+	IncludeCCMAddon       bool
+}
+
+type workloadReadinessOptions struct {
+	Namespace           string
+	ClusterName         string
+	TestID              string
+	WantNodes           int
+	WantMachines        int
+	InstallCNI          bool
+	WaitForCCM          bool
+	ObservedInstanceIDs *[]string
 }
 
 func stackitVMConfigFromEnv() stackitVMConfig {
@@ -1147,7 +1140,7 @@ spec:
 		cfg.AvailabilityZone, sshKeyName, cfg.RootVolumeSizeGiB, cfg.RootVolumePerformance, securityGroups)
 }
 
-func renderStackitMachineDeploymentScaleFixture(clusterName, testID string, cfg stackitVMConfig, kubernetesVersion string) string {
+func renderStackitInfraOnlyMachineDeploymentFixture(clusterName, testID string, cfg stackitVMConfig, kubernetesVersion string) string {
 	securityGroups := ""
 	for _, securityGroupID := range cfg.SecurityGroupIDs {
 		securityGroups += fmt.Sprintf("\n        - %s", securityGroupID)
@@ -1277,6 +1270,34 @@ spec:
 }
 
 func renderStackitKubeadmClusterFixture(clusterName, testID string, cfg stackitVMConfig, kubernetesVersion string, serviceAccountJSON []byte) string {
+	return renderKubeadmWorkloadClusterFixture(kubeadmWorkloadFixtureOptions{
+		ClusterName:           clusterName,
+		TestID:                testID,
+		Config:                cfg,
+		KubernetesVersion:     kubernetesVersion,
+		ServiceAccountJSON:    serviceAccountJSON,
+		ControlPlaneReplicas:  1,
+		WorkerReplicas:        1,
+		APIServerLoadBalancer: true,
+		IncludeCCMAddon:       true,
+	})
+}
+
+func renderKubeadmWorkloadClusterFixture(opts kubeadmWorkloadFixtureOptions) string {
+	clusterName := opts.ClusterName
+	testID := opts.TestID
+	cfg := opts.Config
+	kubernetesVersion := opts.KubernetesVersion
+	serviceAccountJSON := opts.ServiceAccountJSON
+	controlPlaneReplicas := opts.ControlPlaneReplicas
+	if controlPlaneReplicas == 0 {
+		controlPlaneReplicas = 1
+	}
+	workerReplicas := opts.WorkerReplicas
+	if workerReplicas == 0 {
+		workerReplicas = 1
+	}
+
 	securityGroups := ""
 	for _, securityGroupID := range cfg.SecurityGroupIDs {
 		securityGroups += fmt.Sprintf("\n        - %s", securityGroupID)
@@ -1353,7 +1374,7 @@ metadata:
     cluster-api-provider-stackit/e2e: "true"
     cluster-api-provider-stackit/test-id: "%[2]s"
 spec:
-  replicas: 1
+  replicas: %[20]d
   version: %[16]s
   machineTemplate:
     metadata:
@@ -1430,7 +1451,7 @@ metadata:
     cluster-api-provider-stackit/test-id: "%[2]s"
 spec:
   clusterName: %[1]s
-  replicas: 1
+  replicas: %[21]d
   selector:
     matchLabels:
       cluster.x-k8s.io/cluster-name: %[1]s
@@ -1532,7 +1553,7 @@ stringData:
 `, clusterName, testID, cfg.Namespace, cfg.ProjectID, cfg.Region, cfg.CredentialsSecretName, cfg.CredentialsSecretNS,
 		cfg.NetworkID, cfg.ImageID, cfg.MachineType, cfg.AvailabilityZone, sshKeyName, cfg.RootVolumeSizeGiB,
 		cfg.RootVolumePerformance, securityGroups, kubernetesVersion, controlPlanePreKubeadmCommands, workerPreKubeadmCommands,
-		cloudProviderStackitAddon)
+		cloudProviderStackitAddon, controlPlaneReplicas, workerReplicas)
 }
 
 func kubernetesAptRepoMinor(kubernetesVersion string) string {
@@ -1802,6 +1823,60 @@ func kubectlOutputWithKubeconfig(g Gomega, kubeconfig string, args ...string) st
 	output, err := utils.Run(cmd)
 	g.Expect(err).NotTo(HaveOccurred())
 	return strings.TrimSpace(output)
+}
+
+func waitForKubeadmWorkloadClusterReady(opts workloadReadinessOptions, workloadKubeconfig *string) {
+	By("waiting for the StackitCluster to become ready")
+	Eventually(func(g Gomega) {
+		output := kubectlOutput(g, "get", "stackitcluster", opts.ClusterName, "-n", opts.Namespace, "-o", "jsonpath={.status.ready}")
+		g.Expect(output).To(Equal("true"))
+	}, 15*time.Minute, 10*time.Second).Should(Succeed())
+
+	By("waiting for the control-plane VM to provision")
+	Eventually(func(g Gomega) {
+		machine := readyStackitMachineByNamePart(g, opts.Namespace, opts.TestID, "control-plane")
+		appendObservedInstanceIDs(opts.ObservedInstanceIDs, machine.Status.InstanceID)
+	}, 45*time.Minute, 15*time.Second).Should(Succeed())
+
+	By("extracting the workload Cluster kubeconfig")
+	Eventually(func(g Gomega) {
+		*workloadKubeconfig = workloadKubeconfigFromSecret(g, opts.ClusterName, opts.Namespace)
+		output := kubectlOutputWithKubeconfig(g, *workloadKubeconfig, "get", "ns", "kube-system", "-o", "name")
+		g.Expect(output).To(Equal("namespace/kube-system"))
+	}, 20*time.Minute, 15*time.Second).Should(Succeed())
+
+	if opts.InstallCNI {
+		By("installing CNI into the workload Cluster")
+		installWorkloadCNI(*workloadKubeconfig)
+	}
+
+	if opts.WaitForCCM {
+		By("waiting for embedded cloud-provider-stackit rollout")
+		waitForWorkloadCCMRollout(*workloadKubeconfig)
+	}
+
+	By("waiting for workload StackitMachines to provision")
+	Eventually(func(g Gomega) {
+		machines := readyStackitMachines(g, opts.Namespace, opts.TestID, opts.WantMachines)
+		appendObservedInstanceIDs(opts.ObservedInstanceIDs, instanceIDs(machines)...)
+	}, 45*time.Minute, 15*time.Second).Should(Succeed())
+
+	By("waiting for workload Nodes to be Ready")
+	Eventually(func(g Gomega) {
+		expectWorkloadNodesReady(g, *workloadKubeconfig, opts.WantNodes)
+	}, 25*time.Minute, 15*time.Second).Should(Succeed())
+
+	By("verifying CAPI Machines reference Nodes with matching STACKIT providerIDs")
+	Eventually(func(g Gomega) {
+		expectProviderIDNodeRefAlignment(g, opts.Namespace, opts.ClusterName, opts.TestID, *workloadKubeconfig, opts.WantMachines)
+	}, 15*time.Minute, 10*time.Second).Should(Succeed())
+}
+
+func appendObservedInstanceIDs(observed *[]string, instanceIDs ...string) {
+	if observed == nil {
+		return
+	}
+	*observed = appendUnique(*observed, instanceIDs...)
 }
 
 func waitForWorkloadCCMRollout(kubeconfig string) {

@@ -39,3 +39,11 @@ kubectl apply -f "${CLUSTER_NAME}-topology.yaml"
 The management cluster must run CAPI core and kubeadm-control-plane with
 `ClusterTopology=true`. Otherwise the admission webhooks reject `ClusterClass`,
 `KubeadmControlPlaneTemplate`, and `Cluster.spec.topology`.
+
+The topology template currently covers the infrastructure, control-plane, and
+worker topology wiring only. Unlike the default non-topology
+`templates/cluster-template.yaml`, it does not include the
+`cloud-provider-stackit` `ClusterResourceSet` addon or the workload-cluster
+Secret for the cloud controller manager. Apply equivalent addon wiring before
+expecting topology workload Nodes to become Ready with the external cloud
+provider.

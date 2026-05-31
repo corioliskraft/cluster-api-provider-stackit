@@ -7,10 +7,14 @@ kind create cluster --name capi-stackit
 kubectl config use-context kind-capi-stackit
 ```
 
-Install Cluster API core, kubeadm bootstrap, and kubeadm control-plane providers:
+Install Cluster API core, kubeadm bootstrap, and kubeadm control-plane providers.
+Use the local clusterctl config so the `ClusterResourceSet` feature is enabled;
+the default non-topology cluster template uses it to install
+`cloud-provider-stackit` into workload clusters:
 
 ```sh
 clusterctl init \
+  --config hack/clusterctl-local.yaml \
   --core cluster-api \
   --bootstrap kubeadm \
   --control-plane kubeadm
@@ -33,6 +37,6 @@ kubectl rollout status \
   deployment/cluster-api-provider-stackit-controller-manager
 ```
 
-For ClusterClass and topology clusters, initialize or patch CAPI with
-`ClusterTopology=true`. The local `hack/clusterctl-local.yaml` enables this
+For ClusterClass and topology clusters, CAPI must also run with
+`ClusterTopology=true`. The same local `hack/clusterctl-local.yaml` enables this
 feature gate for clusterctl-based local installs.

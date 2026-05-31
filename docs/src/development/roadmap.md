@@ -16,10 +16,12 @@ Done or mostly done:
 - worker replacement upgrade coverage
 - failure domain publication
 - ClusterClass templates
+- 1 control-plane / 1 worker workload-cluster NodeRef and Node readiness e2e
 
 Open work:
 
-- full workload-cluster Node readiness with `cloud-provider-stackit`
+- worker scale Node readiness/removal with `cloud-provider-stackit`
+- automatic upgrade rollout and control-plane upgrade readiness with real Nodes
 - full ClusterClass create/ready/delete e2e
 - release/distribution decision
 - broader production hardening

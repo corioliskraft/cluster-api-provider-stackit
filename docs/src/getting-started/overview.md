@@ -23,7 +23,10 @@ The target flow is:
 
 ```sh
 kind create cluster --name capi-stackit
-clusterctl init --bootstrap kubeadm --control-plane kubeadm
+clusterctl init \
+  --config hack/clusterctl-local.yaml \
+  --bootstrap kubeadm \
+  --control-plane kubeadm
 make install
 make run
 kubectl apply -f rendered-cluster.yaml
@@ -38,14 +41,15 @@ provider-created STACKIT resources deleted when the Cluster is deleted.
 The provider is a solid MVP, but it is not production-ready yet. It can use
 existing STACKIT networks, create and delete VMs, set provider IDs, and manage
 an optional API server load balancer. The remaining gaps are mostly around
-workload-cluster readiness, cloud-provider integration, release/distribution,
-and Cluster API contract details.
+broader workload-cluster readiness coverage, release/distribution, and Cluster
+API contract details.
 
 - Workload-cluster readiness is covered by the NodeRef e2e path for 1
   control-plane / 1 worker clusters. The default cluster template installs
   `cloud-provider-stackit` through a Cluster API `ClusterResourceSet`, and the
   NodeRef e2e verifies `StackitMachine`, CAPI `Machine`, and workload `Node`
-  provider ID alignment.
+  provider ID alignment. The template does not install a CNI; users must install
+  one separately after the workload API is reachable.
 - The release story is not finalized. Local `clusterctl` assets can be
   generated, but the final distribution path is still open. Production use
   needs versioned images, published `clusterctl` assets, upgrade guidance,

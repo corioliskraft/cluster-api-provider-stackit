@@ -13,7 +13,7 @@ make -C docs serve
 
 ## Status
 
-This provider is in early development. The controller and SDK paths have unit/envtest coverage, and the SDK load balancer behavior has been validated against a real STACKIT project. Full workload-cluster e2e coverage is still pending.
+This provider is in early development. The controller and SDK paths have unit/envtest coverage, and real STACKIT e2e coverage exists for VM lifecycle, create/delete, and the 1 control-plane / 1 worker workload-cluster NodeRef/Node readiness path. Broader workload-cluster e2e coverage for scale, upgrades, and ClusterClass is still pending.
 
 ## Prerequisites
 
@@ -110,13 +110,19 @@ minor:
 | `v1.35.x` | `v1.35.x` |
 | `v1.36.x` | `v1.36.x` |
 
-Use the latest Kubernetes patch release for the selected minor. The e2e
-defaults use `v1.33.12`, `v1.34.8`, `v1.35.5`, and `v1.36.1` as currently
-published by Kubernetes, while the embedded CCM defaults use the latest
-verified `cloud-provider-stackit` image tag for the same minor.
+Use a supported patch release for the selected minor. The e2e defaults currently
+use Kubernetes `v1.33.12` by default and verified `cloud-provider-stackit`
+image defaults `v1.33.12`, `v1.34.8`, `v1.35.3`, and `v1.36.0` for the
+supported minors. Override `STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE` when using
+a different patch release and keep the image minor aligned with
+`KUBERNETES_VERSION`.
 
 `clusterctl init` must run with the `ClusterResourceSet` feature enabled. The
 local `hack/clusterctl-local.yaml` sets `CLUSTER_RESOURCE_SET=true`.
+
+The default template installs `cloud-provider-stackit`, but it does not install
+a CNI. Install a CNI after the workload API is reachable; the e2e NodeRef path
+uses Cilium by default.
 
 Apply the rendered manifest to a management cluster with Cluster API and this provider installed:
 

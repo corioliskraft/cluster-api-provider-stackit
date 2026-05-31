@@ -58,46 +58,234 @@ I did not run the billable real-cloud e2e suite for this analysis.
 Goal: make scale, upgrade, and topology tests reuse the proven NodeRef
 workload-cluster path without copying large YAML strings.
 
-Implementation tasks:
+### Current Code To Refactor
 
-- Refactor `renderStackitKubeadmClusterFixture` into smaller helpers that can
-  render:
-  - base `Cluster`
+- `renderStackitKubeadmClusterFixture` currently renders the complete real
+  workload fixture as one large `fmt.Sprintf` block. It already contains the
+  correct non-topology object set for Ready Nodes:
+  - `Cluster`
   - `StackitCluster`
   - `KubeadmControlPlane`
   - control-plane `StackitMachineTemplate`
   - worker `MachineDeployment`
   - worker `StackitMachineTemplate`
   - worker `KubeadmConfigTemplate`
-  - `cloud-provider-stackit` `ClusterResourceSet` and Secret
-- Add options for initial worker replica count, Kubernetes version, CNI choice,
-  API server load balancer, and test labels.
-- Keep the current static bootstrap fixture under a clearly named helper such
-  as `renderStackitInfraOnlyMachineDeploymentFixture` so infra-only tests remain
-  available and intentionally scoped.
-- Add a helper that performs the common readiness sequence:
+  - `cloud-provider-stackit` `ClusterResourceSet`
+  - `cloud-provider-stackit` Secret
+- `renderStackitMachineDeploymentScaleFixture` is the infra-only fixture used
+  by current scale and upgrade tests. It creates a static bootstrap Secret
+  instead of CABPK kubeadm bootstrap objects, so it must not be reused for full
+  workload readiness tests.
+- The NodeRef scenario already contains the common runtime sequence that scale,
+  upgrade, and topology tests need:
   - wait for `StackitCluster.status.ready=true`
-  - wait for control-plane VM readiness
-  - extract workload kubeconfig
-  - install workload CNI
-  - wait for `cloud-provider-stackit`
-  - wait for expected workload Nodes Ready
-  - assert Machine/Node providerID alignment
-- Add helper functions for counting worker Nodes by MachineDeployment labels or
-  by CAPI Machine `status.nodeRef`.
+  - wait for the control-plane `StackitMachine`
+  - extract workload kubeconfig from `<cluster-name>-kubeconfig`
+  - install CNI with `installWorkloadCNI`
+  - wait for `cloud-provider-stackit` with `waitForWorkloadCCMRollout`
+  - wait for Ready workload Nodes with `expectWorkloadNodesReady`
+  - assert Machine/Node providerID alignment with
+    `expectProviderIDNodeRefAlignment`
 
-Acceptance criteria:
+### Proposed Helper Types
 
-- Existing `STACKIT_E2E_NODE_REF=true` scenario still passes with the refactored
-  helpers.
-- Existing infra-only scale and upgrade tests either still compile unchanged or
-  are explicitly renamed to show they are infrastructure lifecycle tests.
-- `make test` passes.
+Add small option structs near the e2e fixture rendering helpers. Keep them in
+`test/e2e/e2e_test.go` first; move to a separate file only if the file becomes
+hard to navigate.
 
-Suggested command:
+```go
+type kubeadmWorkloadFixtureOptions struct {
+	ClusterName          string
+	TestID               string
+	Config               stackitVMConfig
+	KubernetesVersion    string
+	ServiceAccountJSON   []byte
+	ControlPlaneReplicas int
+	WorkerReplicas       int
+	APIServerLoadBalancer bool
+	IncludeCCMAddon      bool
+}
+
+type workloadReadinessOptions struct {
+	Namespace      string
+	ClusterName    string
+	TestID         string
+	WantNodes      int
+	WantMachines   int
+	InstallCNI     bool
+	WaitForCCM     bool
+}
+```
+
+Implementation notes:
+
+- Default `ControlPlaneReplicas` to `1`, `WorkerReplicas` to `1`,
+  `APIServerLoadBalancer` to `true`, and `IncludeCCMAddon` to `true`.
+- Keep `ServiceAccountJSON` required when `IncludeCCMAddon=true`.
+- Keep the Kubernetes package-install fallback behavior exactly as today. This
+  milestone is a refactor, not the image-build milestone.
+- Use plain Go string assembly or small `fmt.Sprintf` helpers. Do not introduce
+  a YAML templating dependency for e2e tests.
+
+### Fixture Rendering Breakdown
+
+Create helpers with one responsibility each:
+
+- `renderKubeadmWorkloadClusterFixture(opts kubeadmWorkloadFixtureOptions) string`
+  - top-level orchestrator replacing `renderStackitKubeadmClusterFixture`
+  - joins object fragments with `---`
+  - validates required fields with `Expect`
+- `renderCAPICluster(opts) string`
+  - renders the base CAPI `Cluster`
+  - includes `cluster-api-provider-stackit/cloud-provider-stackit: "true"`
+    only when `IncludeCCMAddon=true`
+- `renderStackitCluster(opts) string`
+  - renders existing network, credentials, region, labels, and API server load
+    balancer choice
+- `renderKubeadmControlPlane(opts) string`
+  - renders replicas, version, kubeadm init/join config, external cloud
+    provider kubelet/controller-manager args, and control-plane runtime package
+    install commands
+- `renderStackitMachineTemplate(name string, opts, role string) string`
+  - renders machine type, image, AZ, root volume, optional SSH key, optional
+    security groups, network ID, and test labels
+  - role can be `control-plane` or `worker` only for naming and diagnostics
+- `renderWorkerMachineDeployment(opts) string`
+  - renders replicas, selector, version, kubeadm bootstrap configRef, and
+    infrastructureRef
+- `renderWorkerKubeadmConfigTemplate(opts) string`
+  - renders worker runtime package install commands and kubeadm join config
+- `renderCloudProviderStackitClusterResourceSet(opts) string`
+  - renders the existing CRS and Secret using `renderCloudProviderStackitAddon`
+  - returns an empty string when `IncludeCCMAddon=false`
+
+Keep the old exported-looking function name as a compatibility wrapper while
+migrating:
+
+```go
+func renderStackitKubeadmClusterFixture(clusterName, testID string, cfg stackitVMConfig, kubernetesVersion string, serviceAccountJSON []byte) string {
+	return renderKubeadmWorkloadClusterFixture(kubeadmWorkloadFixtureOptions{
+		ClusterName: clusterName,
+		TestID: testID,
+		Config: cfg,
+		KubernetesVersion: kubernetesVersion,
+		ServiceAccountJSON: serviceAccountJSON,
+		ControlPlaneReplicas: 1,
+		WorkerReplicas: 1,
+		APIServerLoadBalancer: true,
+		IncludeCCMAddon: true,
+	})
+}
+```
+
+### Readiness Helper Breakdown
+
+Create a single orchestration helper for the NodeRef success path:
+
+```go
+func waitForKubeadmWorkloadClusterReady(
+	g Gomega,
+	opts workloadReadinessOptions,
+	workloadKubeconfig *string,
+) {
+	// wait StackitCluster ready
+	// wait control-plane StackitMachine ready
+	// extract kubeconfig
+	// install CNI if requested
+	// wait CCM if requested
+	// wait expected StackitMachines
+	// wait workload Nodes Ready
+	// assert providerID alignment
+}
+```
+
+Implementation notes:
+
+- Pass `workloadKubeconfig` by pointer so callers can reuse the path for later
+  scale and upgrade assertions and remove it in `defer`.
+- Do not hide cleanup in this helper. Cleanup must remain explicit in each
+  scenario because each test owns different cloud resources and observations.
+- Keep timeouts at least as generous as the current NodeRef test:
+  - 15 minutes for `StackitCluster` readiness
+  - 45 minutes for initial VM readiness
+  - 20 minutes for kubeconfig/API reachability
+  - 25 minutes for workload Node readiness
+  - 15 minutes for providerID alignment
+- Keep `installWorkloadCNI` idempotence assumptions local to e2e. The helper
+  should run it once during initial cluster readiness, not during every scale or
+  upgrade assertion.
+
+Add focused lower-level helpers for later milestones:
+
+- `expectMachineDeploymentReplicas(g, namespace, name string, replicas int)`
+- `expectMachineDeploymentReadyReplicas(g, namespace, name string, replicas int)`
+- `workerMachinesForDeployment(g, namespace, clusterName, deploymentName string) []capiMachineItem`
+- `nodeNamesForMachines(machines []capiMachineItem) []string`
+- `expectWorkloadNodesGone(g, kubeconfig string, nodeNames []string)`
+- `expectWorkloadNodesReadyForMachines(g, kubeconfig string, machines []capiMachineItem)`
+
+Only implement the helpers required by the NodeRef refactor in Milestone 1.
+Leave helper additions that are only used by scale or upgrade to those
+milestones unless they are trivial and directly tested by the NodeRef scenario.
+
+### Infra-Only Fixture Naming
+
+Rename `renderStackitMachineDeploymentScaleFixture` to make its scope explicit:
+
+```go
+renderStackitInfraOnlyMachineDeploymentFixture
+```
+
+Keep a short compatibility wrapper if the rename makes the diff noisy:
+
+```go
+func renderStackitMachineDeploymentScaleFixture(...) string {
+	return renderStackitInfraOnlyMachineDeploymentFixture(...)
+}
+```
+
+Update `By(...)` descriptions in the current scale and upgrade tests to include
+`infra-only` or `infrastructure lifecycle` so test output cannot be confused
+with full workload coverage.
+
+### Migration Order
+
+1. Add option structs and small rendering helpers.
+2. Reimplement `renderStackitKubeadmClusterFixture` as a wrapper around the new
+   top-level real workload fixture renderer.
+3. Add `waitForKubeadmWorkloadClusterReady` and migrate the NodeRef test to it.
+4. Rename or wrap the infra-only MachineDeployment fixture.
+5. Run the fast test suite.
+6. Run the NodeRef billable e2e scenario once to prove the refactor preserved
+   behavior. This validation is required before marking the milestone complete.
+
+### Acceptance Criteria
+
+- The NodeRef test body is shorter and delegates repeated setup/readiness logic
+  to helpers.
+- The rendered YAML for the existing NodeRef fixture is behaviorally equivalent:
+  same object kinds, same labels, same cloud-provider addon, same kubeadm
+  external cloud-provider settings, same runtime package-install fallback.
+- Existing infra-only scale and upgrade scenarios remain independently gated by
+  `STACKIT_E2E_SCALE_WORKERS=true` and `STACKIT_E2E_UPGRADE_WORKERS=true`.
+- Names or log messages make clear that the current scale and upgrade scenarios
+  are infrastructure lifecycle coverage, not workload Node readiness coverage.
+- No API types, templates, CRDs, RBAC, or production manifests change.
+
+### Verification
 
 ```sh
 make test
+```
+
+Required billable verification:
+
+```sh
+env STACKIT_E2E_NODE_REF=true \
+  KUBERNETES_VERSION=v1.35.3 \
+  STACKIT_E2E_CNI=cilium \
+  go test -tags=e2e ./test/e2e -v -ginkgo.v \
+  --ginkgo.focus='align StackitMachine'
 ```
 
 ## Milestone 2: Full Worker Scale E2E

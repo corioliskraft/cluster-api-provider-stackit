@@ -1,5 +1,13 @@
 # cluster-api-provider-stackit - AI Agent Guide
 
+This guide is the primary instruction file for AI coding agents working in this repository.
+
+## Project Context
+
+This project implements a [Cluster API](https://github.com/kubernetes-sigs/cluster-api)
+(CAPI) provider for provisioning Kubernetes clusters on STACKIT. For now it supports pure
+STACKIT-VM based clusters (unmanaged), and aims to support SKE clusters (managed).
+
 ## Project Structure
 
 **Single-group layout (default):**

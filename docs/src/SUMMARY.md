@@ -1,51 +1,35 @@
 # Summary
 
-[Introduction](index.md)
-
-# Getting Started
-
-- [Overview](getting-started/overview.md)
-- [Prerequisites](getting-started/prerequisites.md)
-- [Credentials](getting-started/credentials.md)
-- [STACKIT Cloud Resources](getting-started/cloud-resources.md)
-- [Management Cluster](getting-started/management-cluster.md)
-
-# Usage
-
-- [clusterctl](usage/clusterctl.md)
-- [Cluster Template](usage/cluster-template.md)
-- [Workload CNI](usage/cni.md)
-- [ClusterClass](usage/clusterclass.md)
-- [Cluster Upgrade](usage/upgrade.md)
-- [Cleanup](usage/cleanup.md)
-
-# Architecture
-
-- [Overview](architecture/overview.md)
-- [Cluster API Contract](architecture/api-contract.md)
-- [Controllers](architecture/controllers.md)
-- [Cloud Client](architecture/cloud-client.md)
-- [ProviderID](architecture/providerid.md)
-- [Failure Domains](architecture/failure-domains.md)
-
-# Testing
-
-- [Overview](testing/overview.md)
-- [Unit and Envtest](testing/unit-envtest.md)
-- [Create/Delete E2E](testing/e2e-create-delete.md)
-- [Scale](testing/scale.md)
-- [Upgrade](testing/upgrade.md)
-
-# Development
-
-- [Roadmap](development/roadmap.md)
-- [PR Plan](development/pr-plan.md)
-- [Release Packaging](development/release-packaging.md)
-- [Cloud Resource Management](development/cloud-resource-management.md)
-- [Full Workload E2E Plan](development/full-workload-e2e-plan.md)
-
-# Reference
-
-- [Template Variables](reference/variables.md)
-- [Make Targets](reference/make-targets.md)
-- [Troubleshooting](reference/troubleshooting.md)
+- [Introduction](index.md)
+- [Quick Start](quick-start.md)
+- [Quick Start Operator](quick-start-operator.md)
+- [OS Images](./topics/images/images.md)
+- [Topics](./topics/index.md)
+  - [Accessing VM instances](./topics/accessing-vm-instances.md)
+  - [Failure domains](./topics/failure-domains.md)
+  - [Userdata Privacy](./topics/userdata-privacy.md)
+  - [Troubleshooting](./topics/troubleshooting.md)
+  - [IAM Permissions Used](./topics/iam-permissions.md)
+  - [Instance Metadata](./topics/instance-metadata.md)
+  <!-- - [Machine Pools](./topics/machinepools.md)
+  - [Bring Your Own STACKIT Infrastructure](./topics/bring-your-own-aws-infrastructure.md)
+  - [Specifying the IAM Role to use for Management Components](./topics/specify-management-iam-role.md)
+  -->
+  <!--- [External Resource Garbage Collection](./topics/external-resource-gc.md) -->
+- [Developer Guide](development/index.md)
+  - [Architecture](development/architecture.md)
+  - [Development with Tilt](development/tilt-setup.md)
+  - [Developing E2E tests](development/testing.md)
+  - [Make Targets](development/make-targets.md)
+  - [Coding Conventions](./development/conventions.md)
+  - [Release Packaging](development/release-packaging.md)
+- [CRD Reference](./crd/index.md)
+- [Reference](./topics/reference/reference.md)
+  - [Glossary](./topics/reference/glossary.md)
+  - [Ports](./topics/reference/ports.md)
+  - [Version Support](./topics/reference/versions.md)
+  - [Contributing](./topics/reference/contributing.md)
+- [Roadmap](./roadmap.md)
+- [Legacy Reference](reference/index.md)
+  - [Template Variables](reference/variables.md)
+  - [Troubleshooting](reference/troubleshooting.md)

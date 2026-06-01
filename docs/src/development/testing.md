@@ -1,4 +1,6 @@
-# Testing Overview
+# Testing
+
+## Unit and Env-Tests
 
 Testing is split into layers:
 
@@ -13,10 +15,17 @@ Default test command:
 make test
 ```
 
+This runs:
+
+- generated manifest checks through controller-gen
+- `go fmt`
+- `go vet`
+- envtest-backed Go tests, excluding `/e2e`
+
 Real cloud tests are gated by environment variables so they do not run
 accidentally.
 
-## Billable Workload E2E
+## E2E-Tests
 
 The full workload paths create real STACKIT servers and load balancers. Run them
 only in a dedicated STACKIT project with cleanup permissions and cost controls.

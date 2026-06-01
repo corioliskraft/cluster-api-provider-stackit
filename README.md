@@ -1,339 +1,89 @@
-# cluster-api-provider-stackit
+# Kubernetes Cluster API Provider STACKIT
 
-Cluster API infrastructure provider for STACKIT.
+<p align="center">
+<img src="https://github.com/kubernetes/kubernetes/raw/master/logo/logo.png"  width="100x"><a href="https://stackit.com/"><img width="192x" src="https://www.startup-atlas.de/uploads/logos/12482.svg" alt="STACKIT - A Brand By Schwarz Digits"></a>
+</p>
 
-This repository contains the Kubernetes API types, controllers, cloud abstraction, and STACKIT SDK backend needed to create STACKIT infrastructure for Cluster API workload clusters. The current implementation manages existing STACKIT networks, STACKIT servers, and an optional provider-managed API server load balancer for control-plane machines.
+<p align="center">
+<!-- go doc / reference card
+<a href="https://godoc.org/sigs.k8s.io/cluster-api-provider-stackit">
+<img src="https://godoc.org/sigs.k8s.io/cluster-api-provider-stackit?status.svg"></a>
+ -->
+<!-- goreportcard badge 
+<a href="https://goreportcard.com/report/sigs.k8s.io/cluster-api-provider-stackit">
+<img src="https://goreportcard.com/badge/sigs.k8s.io/cluster-api-provider-stackit"></a>
+-->
+<!-- join kubernetes slack channel for cluster-api-stackit-provider
+<a href="http://slack.k8s.io/">
+<img src="https://img.shields.io/badge/join%20slack-%23cluster--api--stackit-brightgreen"></a>
+ -->
+<!-- openssf badge 
+<a href="https://bestpractices.coreinfrastructure.org/projects/5688">
+<img src="https://bestpractices.coreinfrastructure.org/projects/5688/badge"></a>
+-->
+</p>
 
-Documentation is available as an mdBook under `docs/`:
+------
 
-```sh
-make -C docs build
-make -C docs serve
+Kubernetes-native declarative infrastructure for STACKIT.
+
+## What is the Cluster API Provider STACKIT
+
+The [Cluster API][cluster_api] brings declarative, Kubernetes-style APIs to cluster creation, configuration and management.
+
+The API itself is shared across multiple cloud providers allowing for true STACKIT hybrid deployments of Kubernetes.
+
+## Documentation
+
+Please see our [book](https://todo) for in-depth documentation.
+
+## Launching a Kubernetes cluster on STACKIT
+
+Check out the [Cluster API Quick Start](https://cluster-api.sigs.k8s.io/user/quick-start.html) for launching a cluster on STACKIT.
+
+## Features
+
+- [x] Native Kubernetes manifests and API
+- [x] Doesn't use SSH for bootstrapping nodes.
+- [x] Installs only the minimal components to bootstrap a control plane and workers.
+- [x] Supports control planes on STACKIT VM instances.
+- [ ] Manages the bootstrapping of networks, security groups and vm instances.
+- [ ] Deploys Kubernetes control planes into private subnets with a separate bastion server.
+- [ ] [SKE](https://stackit.com/de/produkte/runtime/stackit-kubernetes-engine) support
+- [ ] Choice of Linux distribution using various Images.
+
+------
+
+## Compatibility with Cluster API and Kubernetes Versions
+
+This provider's versions are compatible with the following versions of Cluster API
+and support all Kubernetes versions that is supported by its compatible Cluster API version:
+
+|                        | Cluster API v1alpha4 (v0.4) | Cluster API v1beta1 (v1.x) |
+| ---------------------- | :-------------------------: | :------------------------: |
+| CAPA v1alpha1 `(main)` |              x              |             ✓              |
+
+(See [Kubernetes support matrix][https://cluster-api.sigs.k8s.io/reference/versions.html] of Cluster API versions).
+
+
+------
+
+## Getting involved and contributing
+
+Are you interested in contributing to cluster-api-provider-stackit? We, the maintainers and community, would love your suggestions, contributions, and help! Also, the maintainers can be contacted at any time to learn more about how to get involved.
+
+We also encourage ALL active community participants to act as if they are maintainers, even if you don't have "official" write permissions. This is a community effort, we are here to serve the Kubernetes community. If you have an active interest and you want to get involved, you have real power! Don't assume that the only people who can get things done around here are the "maintainers".
+
+We also would love to add more "official" maintainers, so show us what you can do!
+
+### Build the images locally
+
+If you want to just build the CAPS containers locally, run
+
+```shell
+  REGISTRY=docker.io/my-reg make docker-build
 ```
 
-## Status
+### Tilt-based development environment
 
-This provider is in early development. The controller and SDK paths have unit/envtest coverage, and real STACKIT e2e coverage exists for VM lifecycle, create/delete, workload-cluster Node readiness, worker scale, worker/control-plane upgrade, and ClusterClass topology create/ready/delete paths.
-
-## Prerequisites
-
-- Go v1.24.6 or newer
-- Docker
-- kubectl
-- kind for local development
-- clusterctl for rendering Cluster API templates
-- Access to a STACKIT project
-- A STACKIT service account JSON key with permissions to read networks and manage servers and load balancers
-- An existing STACKIT network in the target region
-- A STACKIT image ID, machine type, availability zone, and optional SSH key/security group IDs suitable for Kubernetes nodes
-
-## Credentials
-
-Create a Kubernetes Secret in the namespace where the workload cluster will be created. The controller expects the same Secret shape used by the STACKIT machine-controller-manager provider:
-
-- `project-id`: STACKIT project UUID
-- `serviceaccount.json`: STACKIT service account JSON key
-
-Example:
-
-```sh
-kubectl create secret generic stackit-credentials \
-  --from-literal=project-id='4cf9e1f0-1f18-4c5b-bcc5-fbd3dd6675a5' \
-  --from-file=serviceaccount.json=./sa/serviceaccount.json
-```
-
-If `spec.credentialsSecretRef.namespace` is omitted on `StackitCluster`, the controller reads the Secret from the `StackitCluster` namespace.
-
-## STACKIT Infrastructure Inputs
-
-The provider currently creates servers and load balancers in an existing network. It does not create networks, security groups, SSH keys, or images.
-
-Required values:
-
-- `STACKIT_PROJECT_ID`: STACKIT project UUID
-- `STACKIT_REGION`: STACKIT region, for example `eu01`
-- `STACKIT_NETWORK_ID`: UUID of an existing network in the region
-- `STACKIT_IMAGE_ID`: image UUID for the node operating system
-- `STACKIT_MACHINE_TYPE`: STACKIT machine type, for example `c2i.2`
-- `STACKIT_AVAILABILITY_ZONE`: zone, for example `eu01-1`
-- `STACKIT_SSH_KEY_NAME`: optional existing STACKIT SSH key name, only if SSH access is desired
-- `STACKIT_SECURITY_GROUP_ID`: security group UUID applied to created machines
-
-Network and security group prerequisites:
-
-- Control-plane nodes must be reachable by the provider-managed load balancer on TCP `6443`.
-- Nodes need egress for Kubernetes image pulls and package/bootstrap operations.
-- Nodes in the workload cluster need the expected Kubernetes node-to-node and pod/service network traffic for the chosen CNI.
-- The selected image must support cloud-init user data.
-
-The generated provider ID format is `stackit://<server-id>`, matching `cloud-provider-stackit`.
-
-## Cluster Template
-
-`templates/cluster-template.yaml` is intended for `clusterctl generate cluster`.
-Release assets for a local or published clusterctl repository can be generated
-with `make clusterctl-release`.
-
-Example:
-
-```sh
-export CLUSTER_NAME=capi-stackit
-export NAMESPACE=default
-export KUBERNETES_VERSION=v1.34.8
-export CONTROL_PLANE_MACHINE_COUNT=1
-export WORKER_MACHINE_COUNT=1
-export STACKIT_PROJECT_ID=4cf9e1f0-1f18-4c5b-bcc5-fbd3dd6675a5
-export STACKIT_REGION=eu01
-export STACKIT_NETWORK_ID=3a87ac2f-8297-4dea-a9da-11d3c19e45fe
-export STACKIT_IMAGE_ID=3ad2867e-695b-4ee6-9502-b563013413d4 # non-ARM Ubuntu 22.04 in eu01
-export STACKIT_MACHINE_TYPE=c2i.2
-export STACKIT_SSH_KEY_NAME= # optional; leave empty when SSH access is not required
-export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
-export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < ./sa/serviceaccount.json | tr -d '\n')"
-export STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.34.8
-
-hack/validate-stackit-versions.sh
-
-clusterctl generate cluster "$CLUSTER_NAME" \
-  --from templates/cluster-template.yaml \
-  > "${CLUSTER_NAME}.yaml"
-```
-
-The default template embeds `cloud-provider-stackit` through a Cluster API
-`ClusterResourceSet`. The cloud-provider image minor must match the Kubernetes
-minor:
-
-| Kubernetes version | Required `cloud-provider-stackit` image minor |
-| --- | --- |
-| `v1.33.x` | `v1.33.x` |
-| `v1.34.x` | `v1.34.x` |
-| `v1.35.x` | `v1.35.x` |
-| `v1.36.x` | `v1.36.x` |
-
-Use a supported patch release for the selected minor. The e2e defaults currently
-use Kubernetes `v1.33.12` by default and verified `cloud-provider-stackit`
-image defaults `v1.33.12`, `v1.34.8`, `v1.35.3`, and `v1.36.0` for the
-supported minors. Override `STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE` when using
-a different patch release and keep the image minor aligned with
-`KUBERNETES_VERSION`.
-
-`clusterctl init` must run with the `ClusterResourceSet` feature enabled. The
-local `hack/clusterctl-local.yaml` sets `CLUSTER_RESOURCE_SET=true`.
-
-The default template installs `cloud-provider-stackit`, but it does not install
-a CNI. Install a CNI after the workload API is reachable; the e2e NodeRef path
-uses Cilium by default. For a repeatable development install, use:
-
-```sh
-clusterctl get kubeconfig "$CLUSTER_NAME" \
-  --namespace "$NAMESPACE" \
-  > "${CLUSTER_NAME}.kubeconfig"
-
-make install-workload-cni \
-  WORKLOAD_KUBECONFIG="${CLUSTER_NAME}.kubeconfig"
-```
-
-The helper installs Cilium by default using `templates/addons/cilium-values.yaml`.
-Set `STACKIT_WORKLOAD_CNI=calico` to install Calico, or set `CNI_MANIFEST` to
-apply a custom CNI manifest. For production clusters, manage the CNI with Helm,
-GitOps, or an addon provider rather than treating the infrastructure template as
-the CNI lifecycle owner.
-
-Apply the rendered manifest to a management cluster with Cluster API and this provider installed:
-
-```sh
-kubectl apply -f "${CLUSTER_NAME}.yaml"
-```
-
-## Local Development
-
-Install CRDs into the current cluster:
-
-```sh
-make install
-```
-
-Run the controller locally against the current kubeconfig context:
-
-```sh
-make run
-```
-
-Build and deploy the controller image:
-
-```sh
-export IMG=<registry>/cluster-api-provider-stackit:<tag>
-make docker-build docker-push IMG="$IMG"
-make deploy IMG="$IMG"
-```
-
-For a local kind management cluster, build and load the image instead of pushing it:
-
-```sh
-export IMG=cluster-api-provider-stackit:dev
-make docker-build IMG="$IMG"
-kind load docker-image "$IMG" --name capi-stackit
-make deploy IMG="$IMG"
-```
-
-The local development cluster used during validation is `kind-capi-stackit`.
-
-## Tests
-
-Run unit and envtest coverage:
-
-```sh
-make test
-```
-
-Run the opt-in STACKIT SDK integration tests with real credentials:
-
-```sh
-STACKIT_NETWORK_ID=<network-uuid> \
-STACKIT_TEST_TARGET_IP=<target-ip-on-network> \
-go test -tags=stackit_integration ./pkg/cloud -run 'TestSDKClient.*Integration' -v
-```
-
-The integration tests require a valid credentials Secret or local service account key, an existing network, and a target IP in that network for load balancer target-pool validation.
-
-Integration and e2e tests are opt-in because they create or inspect real STACKIT resources:
-
-| Test | Command | Required opt-in env vars | Common env vars | Test-specific env vars |
-| --- | --- | --- | --- | --- |
-| STACKIT SDK integration | `go test -tags=stackit_integration ./pkg/cloud -run 'TestSDKClient.*Integration' -v` | none | `STACKIT_PROJECT_ID`, `STACKIT_REGION`, `STACKIT_SERVICE_ACCOUNT_JSON_FILE` | `STACKIT_NETWORK_ID`, `STACKIT_TEST_TARGET_IP` |
-| Real VM lifecycle e2e | `go test -tags=e2e ./test/e2e -v -ginkgo.v --ginkgo.focus='real STACKIT VM'` | `STACKIT_E2E_CREATE_VMS=true` | `KIND_CLUSTER`, `STACKIT_PROJECT_ID`, `STACKIT_REGION`, `STACKIT_NETWORK_ID`, `STACKIT_IMAGE_ID`, `STACKIT_AVAILABILITY_ZONE`, `STACKIT_CREDENTIALS_SECRET_NAME`, `STACKIT_CREDENTIALS_SECRET_NAMESPACE` | `STACKIT_E2E_TEST_ID`, `STACKIT_E2E_NAMESPACE`, `STACKIT_SSH_KEY_NAME`, `STACKIT_SECURITY_GROUP_IDS`, `STACKIT_ROOT_VOLUME_SIZE_GIB`, `STACKIT_ROOT_VOLUME_PERFORMANCE_CLASS` |
-| 1 control-plane / 1 worker create-delete e2e | `go test -tags=e2e ./test/e2e -v -ginkgo.v --ginkgo.focus='1 control-plane / 1 worker'` | `STACKIT_E2E_CREATE_CLUSTER=true` | same as real VM lifecycle e2e | same as real VM lifecycle e2e |
-| Workload NodeRef/providerID e2e | `go test -tags=e2e ./test/e2e -v -ginkgo.v --ginkgo.focus='align StackitMachine'` | `STACKIT_E2E_NODE_REF=true` | same as real VM lifecycle e2e | `KUBERNETES_VERSION`, `STACKIT_E2E_CNI` (`cilium` by default, or `calico`), `STACKIT_E2E_CNI_MANIFEST`, `STACKIT_E2E_CALICO_MANIFEST`, `STACKIT_E2E_CILIUM_VERSION`, `STACKIT_E2E_CILIUM_CLUSTER_POOL_IPV4_CIDR`, `STACKIT_E2E_CILIUM_CLUSTER_POOL_IPV4_MASK_SIZE`, `STACKIT_E2E_CILIUM_INSTALL_ARGS`, plus the real VM lifecycle e2e optional vars |
-| Worker scale e2e | `go test -tags=e2e ./test/e2e -v -ginkgo.v --ginkgo.focus='scale a worker MachineDeployment'` | `STACKIT_E2E_SCALE_WORKERS=true` | same as real VM lifecycle e2e | `KUBERNETES_VERSION`, plus the real VM lifecycle e2e optional vars |
-| Workload worker scale e2e | `make test-e2e-workload-scale` | `STACKIT_E2E_SCALE_WORKLOAD=true` | same as real VM lifecycle e2e | `KUBERNETES_VERSION`, `STACKIT_E2E_CNI`, plus NodeRef CNI optional vars |
-| Worker upgrade e2e | `go test -tags=e2e ./test/e2e -v -ginkgo.v --ginkgo.focus='replace worker VMs'` | `STACKIT_E2E_UPGRADE_WORKERS=true` | same as real VM lifecycle e2e | `STACKIT_E2E_UPGRADE_FROM`, `STACKIT_E2E_UPGRADE_TO`, plus the real VM lifecycle e2e optional vars |
-| Workload worker upgrade e2e | `make test-e2e-workload-upgrade-workers` | `STACKIT_E2E_UPGRADE_WORKLOAD_WORKERS=true` | same as real VM lifecycle e2e | `STACKIT_E2E_UPGRADE_FROM`, `STACKIT_E2E_UPGRADE_TO`, `STACKIT_E2E_CNI`, plus NodeRef CNI optional vars |
-| Workload control-plane upgrade e2e | `make test-e2e-workload-upgrade-control-plane` | `STACKIT_E2E_UPGRADE_WORKLOAD_CONTROL_PLANE=true` | same as real VM lifecycle e2e | `STACKIT_E2E_UPGRADE_FROM`, `STACKIT_E2E_UPGRADE_TO`, `STACKIT_E2E_CNI`, plus NodeRef CNI optional vars |
-| ClusterClass topology workload e2e | `make test-e2e-workload-topology` | `STACKIT_E2E_TOPOLOGY_WORKLOAD=true` | same as real VM lifecycle e2e | `KUBERNETES_VERSION`, `STACKIT_E2E_CNI`, plus NodeRef CNI optional vars |
-
-The e2e tests always create STACKIT machines with machine type `c2i.2`. Full workload e2e paths install Cilium by default using the `cilium` CLI with cluster-pool IPAM set to the workload cluster pod CIDR (`192.168.0.0/16`, mask size `24`), then wait for the Cilium Operator and DaemonSets to roll out. Set `STACKIT_E2E_CNI=calico` to use Calico instead, or set `STACKIT_E2E_CNI_MANIFEST=<url-or-path>` to apply a custom CNI manifest directly with `kubectl`.
-
-Run the opt-in e2e test that creates and deletes a real STACKIT VM through CAPI `Cluster`/`Machine` and `StackitCluster`/`StackitMachine` objects:
-
-```sh
-export KIND_CLUSTER=capi-stackit
-export STACKIT_E2E_CREATE_VMS=true
-export STACKIT_PROJECT_ID=4cf9e1f0-1f18-4c5b-bcc5-fbd3dd6675a5
-export STACKIT_REGION=eu01
-export STACKIT_NETWORK_ID=3a87ac2f-8297-4dea-a9da-11d3c19e45fe
-export STACKIT_IMAGE_ID=<image-uuid>
-export STACKIT_AVAILABILITY_ZONE=eu01-1
-export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
-export STACKIT_CREDENTIALS_SECRET_NAMESPACE=default
-
-go test -tags=e2e ./test/e2e -v -ginkgo.v \
-  --ginkgo.focus='real STACKIT VM'
-```
-
-Optional VM e2e inputs:
-
-- `STACKIT_E2E_NAMESPACE`: namespace for test resources, defaults to `default`
-- `STACKIT_SSH_KEY_NAME`: optional existing SSH key name
-- `STACKIT_SECURITY_GROUP_IDS`: comma-separated security group UUIDs
-- `STACKIT_ROOT_VOLUME_SIZE_GIB`: defaults to `50`
-- `STACKIT_ROOT_VOLUME_PERFORMANCE_CLASS`: defaults to `storage_premium_perf6`
-
-The VM e2e test is intentionally gated by `STACKIT_E2E_CREATE_VMS=true` because it creates billable cloud resources.
-
-## Uninstall
-
-Delete sample or generated workload-cluster resources first:
-
-```sh
-kubectl delete -f "${CLUSTER_NAME}.yaml"
-```
-
-Undeploy the controller:
-
-```sh
-make undeploy
-```
-
-Delete CRDs:
-
-```sh
-make uninstall
-```
-
-## Distribution
-
-Installer YAML can be generated with:
-
-```sh
-make build-installer IMG=<registry>/cluster-api-provider-stackit:<tag>
-```
-
-This writes `dist/install.yaml`, which can be published for `kubectl apply -f ...` installation. A Helm chart has not been selected as the default distribution path yet.
-
-Clusterctl release assets can be generated with:
-
-```sh
-make clusterctl-release IMG=<registry>/cluster-api-provider-stackit:<tag>
-```
-
-This writes `infrastructure-components.yaml`, `metadata.yaml`,
-`clusterclass.yaml`, `cluster-template.yaml`,
-`cluster-template-development.yaml`, `cluster-template-topology.yaml`, and
-optional addon files under `addons/` to
-`dist/clusterctl/infrastructure-stackit/v0.1.0/`, which matches clusterctl's
-local repository layout.
-
-For local validation, generate the release assets, export the STACKIT template
-variables shown above, and use:
-
-```sh
-export STACKIT_CLUSTERCTL_REPOSITORY="$(pwd)/dist/clusterctl"
-
-clusterctl init --config hack/clusterctl-local.yaml --infrastructure stackit:v0.1.0
-clusterctl generate cluster stackit-test \
-  --config hack/clusterctl-local.yaml \
-  --infrastructure stackit:v0.1.0 \
-  --kubernetes-version v1.33.12 \
-  --control-plane-machine-count 1 \
-  --worker-machine-count 1
-```
-
-The local clusterctl configuration enables the CAPI `ClusterTopology` feature
-gate. This is required before applying `templates/clusterclass.yaml` or any
-Cluster with `spec.topology`, because the CAPI and kubeadm-control-plane
-webhooks reject those resources while the feature gate is disabled.
-For an already initialized management cluster, either re-initialize the CAPI
-providers with this config or patch the `--feature-gates` argument on the CAPI
-core and kubeadm-control-plane controller manager Deployments so
-`ClusterTopology=true`.
-
-## Contributing
-
-Before sending changes, run:
-
-```sh
-make test
-```
-
-After editing API types or kubebuilder markers, run:
-
-```sh
-make manifests
-make generate
-```
-
-## License
-
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+See [development][development] section for details.

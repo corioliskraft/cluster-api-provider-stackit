@@ -19,7 +19,7 @@
   1. Creates a 1 CP / 1 worker workload cluster.
   2. Gets the workload-cluster kubeconfig.
   3. Installs required workload addons:
-      - CNI, so Nodes can become Ready.
+      - CNI, so Nodes can become Ready. Use cilium as cni.
       - templates/addons/cloud-provider-stackit.yaml.
   4. Waits until Nodes exist and have spec.providerID.
   5. Asserts alignment:

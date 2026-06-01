@@ -328,3 +328,7 @@ endef
 define gomodver
 $(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
 endef
+
+.PHONY: serve-book
+serve-book: ## Run a server with the documentation book
+	$(MAKE) -C docs serve

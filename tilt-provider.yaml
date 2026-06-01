@@ -1,0 +1,13 @@
+name: stackit
+config:
+  image: controller:latest
+  label: CAPSTI
+  live_reload_deps:
+    - main.go
+    - go.mod
+    - go.sum
+    - api
+    - cmd
+    - internal
+    - pkg
+  go_main: cmd/main.go

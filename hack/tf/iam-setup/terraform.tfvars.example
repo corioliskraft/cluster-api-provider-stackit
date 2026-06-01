@@ -1,0 +1,7 @@
+project_id                         = "00000000-0000-0000-0000-000000000000"
+region                             = "eu01"
+bootstrap_service_account_key_path = "/absolute/path/to/bootstrap-serviceaccount.json"
+
+# Optional overrides:
+# role_name            = "cluster-api-provider-stackit"
+# service_account_name = "capi-stackit"

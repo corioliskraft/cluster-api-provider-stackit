@@ -8,6 +8,7 @@ title = "Cluster API Provider STACKIT"
 git-repository-url = "https://github.com/stackitcloud/cluster-api-provider-stackit"
 edit-url-template = "https://github.com/stackitcloud/cluster-api-provider-stackit/edit/main/docs/{path}"
 no-section-label = true
+admonitions = true
 
 [preprocessor.embed]
 command = "mdbook-embed"

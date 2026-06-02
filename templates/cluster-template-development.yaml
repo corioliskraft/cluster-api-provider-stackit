@@ -68,10 +68,6 @@ spec:
           - name: cloud-provider
             value: external
     clusterConfiguration:
-      apiServer:
-        extraArgs:
-          - name: cloud-provider
-            value: external
       controllerManager:
         extraArgs:
           - name: cloud-provider
@@ -88,7 +84,6 @@ spec:
       imageID: ${STACKIT_IMAGE_ID}
       machineType: ${STACKIT_MACHINE_TYPE}
       availabilityZone: ${STACKIT_AVAILABILITY_ZONE}
-      sshKeyName: "${STACKIT_SSH_KEY_NAME}"
       rootVolume:
         sizeGiB: 50
         performanceClass: storage_premium_perf6
@@ -139,7 +134,6 @@ spec:
       imageID: ${STACKIT_IMAGE_ID}
       machineType: ${STACKIT_MACHINE_TYPE}
       availabilityZone: ${STACKIT_AVAILABILITY_ZONE}
-      sshKeyName: "${STACKIT_SSH_KEY_NAME}"
       rootVolume:
         sizeGiB: 50
         performanceClass: storage_premium_perf6

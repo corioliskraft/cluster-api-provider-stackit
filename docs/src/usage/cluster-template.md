@@ -30,8 +30,7 @@ kubectl apply -f "${CLUSTER_NAME}.yaml"
 ```
 
 The template configures kubeadm for an external cloud provider by setting
-`cloud-provider=external` on kubelet, API server, and controller-manager where
-needed.
+`cloud-provider=external` on kubelet and controller-manager.
 
 The template also installs `cloud-provider-stackit` into the workload cluster
 through Cluster API `ClusterResourceSet`. The management cluster must have the

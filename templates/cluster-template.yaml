@@ -53,25 +53,42 @@ spec:
         kind: StackitMachineTemplate
         name: ${CLUSTER_NAME}-control-plane
   kubeadmConfigSpec:
+    preKubeadmCommands:
+      - |
+        set -eu
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update
+        apt-get install -y apt-transport-https ca-certificates conntrack curl gpg containerd
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/${KUBERNETES_APT_REPOSITORY_MINOR}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        chmod 0644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KUBERNETES_APT_REPOSITORY_MINOR}/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+        apt-get update
+        apt-get install -y kubelet kubeadm kubectl
+        apt-mark hold kubelet kubeadm kubectl
+        mkdir -p /etc/containerd
+        containerd config default > /etc/containerd/config.toml
+        sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+        systemctl restart containerd
+        modprobe br_netfilter
+        printf 'net.bridge.bridge-nf-call-iptables=1\nnet.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-kubernetes-cri.conf
+        sysctl --system
+        (journalctl -fu kubelet --no-pager > /dev/console 2>&1 &)
     initConfiguration:
       nodeRegistration:
-        name: '{{ ds.meta_data.local_hostname }}'
+        name: "{{ ds.meta_data.local_hostname }}"
         criSocket: unix:///var/run/containerd/containerd.sock
         kubeletExtraArgs:
           - name: cloud-provider
             value: external
     joinConfiguration:
       nodeRegistration:
-        name: '{{ ds.meta_data.local_hostname }}'
+        name: "{{ ds.meta_data.local_hostname }}"
         criSocket: unix:///var/run/containerd/containerd.sock
         kubeletExtraArgs:
           - name: cloud-provider
             value: external
     clusterConfiguration:
-      apiServer:
-        extraArgs:
-          - name: cloud-provider
-            value: external
       controllerManager:
         extraArgs:
           - name: cloud-provider
@@ -87,7 +104,6 @@ spec:
     spec:
       imageID: ${STACKIT_IMAGE_ID}
       machineType: ${STACKIT_MACHINE_TYPE}
-      sshKeyName: "${STACKIT_SSH_KEY_NAME}"
       rootVolume:
         sizeGiB: 50
         performanceClass: storage_premium_perf6
@@ -135,7 +151,6 @@ spec:
     spec:
       imageID: ${STACKIT_IMAGE_ID}
       machineType: ${STACKIT_MACHINE_TYPE}
-      sshKeyName: "${STACKIT_SSH_KEY_NAME}"
       rootVolume:
         sizeGiB: 50
         performanceClass: storage_premium_perf6
@@ -151,9 +166,30 @@ metadata:
 spec:
   template:
     spec:
+      preKubeadmCommands:
+        - |
+          set -eu
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y apt-transport-https ca-certificates conntrack curl gpg containerd
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://pkgs.k8s.io/core:/stable:/${KUBERNETES_APT_REPOSITORY_MINOR}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+          chmod 0644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+          echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KUBERNETES_APT_REPOSITORY_MINOR}/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+          apt-get update
+          apt-get install -y kubelet kubeadm kubectl
+          apt-mark hold kubelet kubeadm kubectl
+          mkdir -p /etc/containerd
+          containerd config default > /etc/containerd/config.toml
+          sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+          systemctl restart containerd
+          modprobe br_netfilter
+          printf 'net.bridge.bridge-nf-call-iptables=1\nnet.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-kubernetes-cri.conf
+          sysctl --system
+          (journalctl -fu kubelet --no-pager > /dev/console 2>&1 &)
       joinConfiguration:
         nodeRegistration:
-          name: '{{ ds.meta_data.local_hostname }}'
+          name: "{{ ds.meta_data.local_hostname }}"
           criSocket: unix:///var/run/containerd/containerd.sock
           kubeletExtraArgs:
             - name: cloud-provider

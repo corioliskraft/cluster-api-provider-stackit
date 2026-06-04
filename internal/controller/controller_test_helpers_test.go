@@ -52,6 +52,26 @@ func createBootstrapSecret(ctx context.Context, name, namespace, value string) {
 	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 }
 
+func createCloudInitConfigMap(ctx context.Context, name, namespace, key, value string) {
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Data: map[string]string{
+			key: value,
+		},
+	}
+	Expect(k8sClient.Create(ctx, configMap)).To(Succeed())
+}
+
+func createCloudInitSecret(ctx context.Context, name, namespace, key, value string) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Data: map[string][]byte{
+			key: []byte(value),
+		},
+	}
+	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+}
+
 func createOwnerCluster(ctx context.Context, name, namespace string) {
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},

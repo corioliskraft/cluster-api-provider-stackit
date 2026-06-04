@@ -94,6 +94,7 @@ type BastionInput struct {
 	AllowedCIDRs []string
 	Tags         map[string]string
 	RootVolume   RootVolumeInput
+	CloudInit    []byte
 }
 
 // NodeSSHAccessInput holds parameters required to allow SSH from the bastion

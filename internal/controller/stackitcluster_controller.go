@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -65,6 +66,7 @@ type StackitClusterReconciler struct {
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=stackitclusters/finalizers,verbs=update
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 
 // Reconcile implements the spec section 18 flow.
 func (r *StackitClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, err error) {
@@ -276,7 +278,7 @@ func (r *StackitClusterReconciler) reconcileBastion(
 	cloudClient cloud.Client,
 	sc *infrav1.StackitCluster,
 ) (ctrl.Result, bool, error) {
-	input := bastionInput(sc)
+	input := bastionInput(sc, nil)
 	status := cloud.Bastion{
 		ServerID:        sc.Status.Bastion.ServerID,
 		PublicIPID:      sc.Status.Bastion.PublicIPID,
@@ -308,6 +310,33 @@ func (r *StackitClusterReconciler) reconcileBastion(
 		return ctrl.Result{}, false, nil
 	}
 
+	cloudInit, err := r.resolveBastionCloudInit(ctx, sc)
+	if err != nil {
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterBastionReadyCondition,
+			metav1.ConditionFalse, "CloudInitRefError", err.Error(), sc.Generation)
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
+			metav1.ConditionFalse, "CloudInitRefError", err.Error(), sc.Generation)
+		sc.Status.Ready = false
+		return ctrl.Result{}, false, nil
+	}
+	input.CloudInit = cloudInit
+
+	if bastionNeedsRecreate(sc, cloudInit) {
+		if err := cloudClient.DeleteNodeSSHAccess(ctx, nodeSSHAccessTags(sc)); err != nil && !cloud.IsNotFound(err) {
+			return ctrl.Result{}, false, err
+		}
+		if err := cloudClient.DeleteBastion(ctx, input, status); err != nil && !cloud.IsNotFound(err) {
+			return ctrl.Result{}, false, err
+		}
+		sc.Status.Bastion = infrav1.StackitBastionStatus{}
+		sc.Status.Ready = false
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterBastionReadyCondition,
+			metav1.ConditionFalse, "Recreating", "recreating bastion because cloudInitRef content changed", sc.Generation)
+		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
+			metav1.ConditionFalse, "Recreating", "recreating bastion because cloudInitRef content changed", sc.Generation)
+		return ctrl.Result{Requeue: true}, false, nil
+	}
+
 	bastion, err := cloudClient.EnsureBastion(ctx, input)
 	if err != nil {
 		return ctrl.Result{}, false, err
@@ -317,6 +346,7 @@ func (r *StackitClusterReconciler) reconcileBastion(
 		PublicIPID:      bastion.PublicIPID,
 		PublicIP:        bastion.PublicIP,
 		SecurityGroupID: bastion.SecurityGroupID,
+		CloudInitHash:   bastionCloudInitHash(cloudInit),
 	}
 	if bastion.ServerState != "" && bastion.ServerState != "ACTIVE" {
 		sc.Status.Ready = false
@@ -361,7 +391,7 @@ func (r *StackitClusterReconciler) reconcileDelete(ctx context.Context, s *scope
 			if err := cloudClient.DeleteNodeSSHAccess(ctx, nodeSSHAccessTags(sc)); err != nil && !cloud.IsNotFound(err) {
 				return ctrl.Result{}, err
 			}
-			if err := cloudClient.DeleteBastion(ctx, bastionInput(sc), cloud.Bastion{
+			if err := cloudClient.DeleteBastion(ctx, bastionInput(sc, nil), cloud.Bastion{
 				ServerID:        sc.Status.Bastion.ServerID,
 				PublicIPID:      sc.Status.Bastion.PublicIPID,
 				PublicIP:        sc.Status.Bastion.PublicIP,
@@ -376,7 +406,7 @@ func (r *StackitClusterReconciler) reconcileDelete(ctx context.Context, s *scope
 	return ctrl.Result{}, nil
 }
 
-func bastionInput(sc *infrav1.StackitCluster) cloud.BastionInput {
+func bastionInput(sc *infrav1.StackitCluster, cloudInit []byte) cloud.BastionInput {
 	deleteOnTermination := true
 	if sc.Spec.Bastion.RootVolume.DeleteOnTermination != nil {
 		deleteOnTermination = *sc.Spec.Bastion.RootVolume.DeleteOnTermination
@@ -398,6 +428,7 @@ func bastionInput(sc *infrav1.StackitCluster) cloud.BastionInput {
 			PerformanceClass:    sc.Spec.Bastion.RootVolume.PerformanceClass,
 			DeleteOnTermination: deleteOnTermination,
 		},
+		CloudInit: cloudInit,
 	}
 }
 
@@ -430,6 +461,58 @@ func validateBastionSpec(spec infrav1.StackitBastionSpec) error {
 
 func hasBastionStatus(status infrav1.StackitBastionStatus) bool {
 	return status.ServerID != "" || status.PublicIPID != "" || status.PublicIP != "" || status.SecurityGroupID != ""
+}
+
+func bastionNeedsRecreate(sc *infrav1.StackitCluster, cloudInit []byte) bool {
+	if !hasBastionStatus(sc.Status.Bastion) {
+		return false
+	}
+	return sc.Status.Bastion.CloudInitHash != bastionCloudInitHash(cloudInit)
+}
+
+func bastionCloudInitHash(cloudInit []byte) string {
+	if len(cloudInit) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(cloudInit))
+}
+
+func (r *StackitClusterReconciler) resolveBastionCloudInit(ctx context.Context, sc *infrav1.StackitCluster) ([]byte, error) {
+	ref := sc.Spec.Bastion.CloudInitRef
+	if ref == nil {
+		return nil, nil
+	}
+	key := types.NamespacedName{Namespace: sc.Namespace, Name: ref.Name}
+	switch ref.Kind {
+	case "ConfigMap":
+		configMap := &corev1.ConfigMap{}
+		if err := r.Get(ctx, key, configMap); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("bastion.cloudInitRef ConfigMap %s not found", key)
+			}
+			return nil, err
+		}
+		value, ok := configMap.Data[ref.Key]
+		if !ok {
+			return nil, fmt.Errorf("bastion.cloudInitRef key %q not found in ConfigMap %s", ref.Key, key)
+		}
+		return []byte(value), nil
+	case "Secret":
+		secret := &corev1.Secret{}
+		if err := r.Get(ctx, key, secret); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("bastion.cloudInitRef Secret %s not found", key)
+			}
+			return nil, err
+		}
+		value, ok := secret.Data[ref.Key]
+		if !ok {
+			return nil, fmt.Errorf("bastion.cloudInitRef key %q not found in Secret %s", ref.Key, key)
+		}
+		return append([]byte(nil), value...), nil
+	default:
+		return nil, fmt.Errorf("bastion.cloudInitRef.kind must be ConfigMap or Secret")
+	}
 }
 
 func (r *StackitClusterReconciler) buildCloudClient(ctx context.Context, sc *infrav1.StackitCluster) (cloud.Client, error) {
@@ -465,6 +548,39 @@ func (r *StackitClusterReconciler) stackitClusterRequestsForCluster(_ context.Co
 	}}
 }
 
+func (r *StackitClusterReconciler) stackitClusterRequestsForCloudInitRef(ctx context.Context, obj client.Object) []reconcile.Request {
+	kind := ""
+	switch obj.(type) {
+	case *corev1.ConfigMap:
+		kind = "ConfigMap"
+	case *corev1.Secret:
+		kind = "Secret"
+	default:
+		return nil
+	}
+
+	clusters := &infrav1.StackitClusterList{}
+	if err := r.List(ctx, clusters, client.InNamespace(obj.GetNamespace())); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list StackitClusters for bastion cloud-init watch", "object", client.ObjectKeyFromObject(obj))
+		return nil
+	}
+
+	requests := make([]reconcile.Request, 0, len(clusters.Items))
+	for _, cluster := range clusters.Items {
+		ref := cluster.Spec.Bastion.CloudInitRef
+		if ref == nil || ref.Kind != kind || ref.Name != obj.GetName() {
+			continue
+		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: cluster.Namespace,
+				Name:      cluster.Name,
+			},
+		})
+	}
+	return requests
+}
+
 func isStackitClusterRef(ref clusterv1.ContractVersionedObjectReference) bool {
 	return ref.APIGroup == infrav1.GroupVersion.Group &&
 		ref.Kind == "StackitCluster" &&
@@ -476,6 +592,8 @@ func (r *StackitClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrav1.StackitCluster{}).
 		Watches(&clusterv1.Cluster{}, handler.EnqueueRequestsFromMapFunc(r.stackitClusterRequestsForCluster)).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.stackitClusterRequestsForCloudInitRef)).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.stackitClusterRequestsForCloudInitRef)).
 		Named("stackitcluster").
 		Complete(r)
 }

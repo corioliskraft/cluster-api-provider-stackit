@@ -210,6 +210,127 @@ var _ = Describe("StackitCluster Controller", func() {
 		Expect(validateBastionSpec(spec)).To(MatchError(ContainSubstring("invalid CIDR")))
 	})
 
+	It("creates the bastion with cloud-init user data from a ConfigMap", func() {
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		cloudInitName := "bastion-cloud-init-" + clusterName
+		cloudInit := "#cloud-config\npackages:\n- htop\n"
+		createCloudInitConfigMap(ctx, cloudInitName, namespace, "userData", cloudInit)
+		got.Spec.Bastion = validBastionSpec()
+		got.Spec.Bastion.CloudInitRef = &infrav1.StackitBastionCloudInitRef{
+			Kind: "ConfigMap",
+			Name: cloudInitName,
+			Key:  "userData",
+		}
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Bastion.ServerID).NotTo(BeEmpty())
+		Expect(got.Status.Bastion.CloudInitHash).To(Equal(bastionCloudInitHash([]byte(cloudInit))))
+		Expect(string(fakeCloud.ServerUserData(got.Status.Bastion.ServerID))).To(Equal(cloudInit))
+	})
+
+	It("creates the bastion with cloud-init user data from a Secret", func() {
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		cloudInitName := "bastion-cloud-init-secret-" + clusterName
+		cloudInit := "#cloud-config\npackages:\n- jq\n"
+		createCloudInitSecret(ctx, cloudInitName, namespace, "userData", cloudInit)
+		got.Spec.Bastion = validBastionSpec()
+		got.Spec.Bastion.CloudInitRef = &infrav1.StackitBastionCloudInitRef{
+			Kind: "Secret",
+			Name: cloudInitName,
+			Key:  "userData",
+		}
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Bastion.ServerID).NotTo(BeEmpty())
+		Expect(got.Status.Bastion.CloudInitHash).To(Equal(bastionCloudInitHash([]byte(cloudInit))))
+		Expect(string(fakeCloud.ServerUserData(got.Status.Bastion.ServerID))).To(Equal(cloudInit))
+	})
+
+	It("marks the bastion not ready when cloud-init ref is missing", func() {
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Spec.Bastion = validBastionSpec()
+		got.Spec.Bastion.CloudInitRef = &infrav1.StackitBastionCloudInitRef{
+			Kind: "ConfigMap",
+			Name: "missing-" + clusterName,
+			Key:  "userData",
+		}
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Ready).To(BeFalse())
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+		expectCondition(got.Status.Conditions, infrav1.ClusterBastionReadyCondition, metav1.ConditionFalse, "CloudInitRefError")
+	})
+
+	It("recreates the bastion and node SSH access when referenced cloud-init changes", func() {
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		cloudInitName := "bastion-cloud-init-" + clusterName
+		createCloudInitConfigMap(ctx, cloudInitName, namespace, "userData", "#cloud-config\npackages:\n- htop\n")
+		got.Spec.Bastion = validBastionSpec()
+		got.Spec.Bastion.CloudInitRef = &infrav1.StackitBastionCloudInitRef{
+			Kind: "ConfigMap",
+			Name: cloudInitName,
+			Key:  "userData",
+		}
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		oldServerID := got.Status.Bastion.ServerID
+		Expect(oldServerID).NotTo(BeEmpty())
+		_, err = fakeCloud.EnsureNodeSSHAccess(ctx, cloud.NodeSSHAccessInput{
+			Name:                   got.Name + "-node-ssh",
+			ServerID:               got.Status.Bastion.ServerID,
+			BastionSecurityGroupID: got.Status.Bastion.SecurityGroupID,
+			Tags:                   nodeSSHAccessTags(got),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fakeCloud.SecurityGroupCount()).To(Equal(2))
+
+		configMap := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cloudInitName, Namespace: namespace}, configMap)).To(Succeed())
+		configMap.Data["userData"] = "#cloud-config\npackages:\n- jq\n"
+		Expect(k8sClient.Update(ctx, configMap)).To(Succeed())
+
+		result, err = reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeTrue())
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+		Expect(fakeCloud.PublicIPCount()).To(Equal(0))
+		Expect(fakeCloud.SecurityGroupCount()).To(Equal(0))
+
+		result, err = reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Bastion.ServerID).NotTo(BeEmpty())
+		Expect(got.Status.Bastion.ServerID).NotTo(Equal(oldServerID))
+		Expect(got.Status.Bastion.CloudInitHash).To(Equal(bastionCloudInitHash([]byte(configMap.Data["userData"]))))
+		Expect(string(fakeCloud.ServerUserData(got.Status.Bastion.ServerID))).To(Equal(configMap.Data["userData"]))
+	})
+
 	It("marks the network not ready when the configured network does not exist", func() {
 		got := &infrav1.StackitCluster{}
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
@@ -343,6 +464,38 @@ var _ = Describe("StackitCluster Controller", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName, Namespace: namespace}, cluster)).To(Succeed())
 
 		requests := reconciler.stackitClusterRequestsForCluster(ctx, cluster)
+		Expect(requests).To(Equal([]reconcile.Request{request}))
+	})
+
+	It("maps bastion cloud-init ConfigMap and Secret events to StackitCluster reconcile requests", func() {
+		configMapName := "bastion-cloud-init-" + clusterName
+		secretName := "bastion-cloud-init-secret-" + clusterName
+		createCloudInitConfigMap(ctx, configMapName, namespace, "userData", "#cloud-config\n")
+		createCloudInitSecret(ctx, secretName, namespace, "userData", "#cloud-config\n")
+
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Spec.Bastion = validBastionSpec()
+		got.Spec.Bastion.CloudInitRef = &infrav1.StackitBastionCloudInitRef{
+			Kind: "ConfigMap",
+			Name: configMapName,
+			Key:  "userData",
+		}
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		configMap := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapName, Namespace: namespace}, configMap)).To(Succeed())
+		requests := reconciler.stackitClusterRequestsForCloudInitRef(ctx, configMap)
+		Expect(requests).To(Equal([]reconcile.Request{request}))
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Spec.Bastion.CloudInitRef.Kind = "Secret"
+		got.Spec.Bastion.CloudInitRef.Name = secretName
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		secret := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret)).To(Succeed())
+		requests = reconciler.stackitClusterRequestsForCloudInitRef(ctx, secret)
 		Expect(requests).To(Equal([]reconcile.Request{request}))
 	})
 

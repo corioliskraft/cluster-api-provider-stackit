@@ -79,6 +79,10 @@ MDBOOK_EMBED := $(BIN_DIR)/mdbook-embed
 $(MDBOOK_EMBED): $(BIN_DIR) go.mod go.sum
 	go build -tags=tools -o $@ sigs.k8s.io/cluster-api/hack/tools/mdbook/embed
 
+MDBOOK_TABULATE := $(BIN_DIR)/mdbook-tabulate
+$(MDBOOK_TABULATE): $(BIN_DIR) go.mod go.sum
+	go build -tags=tools -o $(BIN_DIR)/mdbook-tabulate sigs.k8s.io/cluster-api/hack/tools/mdbook/tabulate
+
 MDBOOK_RELEASELINK := $(BIN_DIR)/mdbook-releaselink
 $(MDBOOK_RELEASELINK): $(BIN_DIR) go.mod go.sum
 	go build -tags=tools -o $@ sigs.k8s.io/cluster-api/hack/tools/mdbook/releaselink

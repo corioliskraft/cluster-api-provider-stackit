@@ -53,12 +53,20 @@ spec:
       sizeGiB: 50
       performanceClass: storage_premium_perf6
       deleteOnTermination: true
+    cloudInitRef:
+      kind: ConfigMap
+      name: <bastion-cloud-init-configmap>
+      key: userData
 ```
 
 Use a narrow `allowedCIDRs` value such as `203.0.113.10/32` where possible.
-`0.0.0.0/0` allows SSH from anywhere and should only be used deliberately.
+`0.0.0.0/0` allows SSH from anywhere and should only be used deliberately.  
 Set `rootVolume` when the chosen machine type's flavor disk is too small for
-the chosen image.
+the chosen image.  
+Set `cloudInitRef` when the bastion host needs additional
+packages, users, files, or other cloud-init customization. The provider reads
+the referenced ConfigMap or Secret and passes the value as-is to the bastion
+VM. It is not applied to control-plane or worker nodes.
 
 For node access, set the same or another existing SSH key on the machine
 templates:
@@ -96,6 +104,70 @@ STACKIT for the service account used by the provider.
 The node SSH security group is shared by all nodes in the cluster. New nodes
 created while bastion is enabled get the group attached during
 `StackitMachine` reconciliation.
+
+## Customize the bastion with cloud-init
+
+`spec.bastion.cloudInitRef` references a complete cloud-init user-data document
+for the bastion VM. Use a ConfigMap for non-sensitive configuration:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bastion-cloud-init
+data:
+  userData: |
+    #cloud-config
+    packages:
+      - jq
+---
+spec:
+  bastion:
+    enabled: true
+    imageID: <ubuntu-image-id>
+    machineType: <machine-type>
+    sshKeyName: <existing-stackit-ssh-key-name>
+    allowedCIDRs:
+      - <your-public-ip-or-network-cidr>
+    cloudInitRef:
+      kind: ConfigMap
+      name: bastion-cloud-init
+      key: userData
+```
+
+Use a Secret instead when the cloud-init document contains sensitive values:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bastion-cloud-init
+stringData:
+  userData: |
+    #cloud-config
+    packages:
+      - jq
+---
+spec:
+  bastion:
+    cloudInitRef:
+      kind: Secret
+      name: bastion-cloud-init
+      key: userData
+```
+
+The referenced object must be in the same namespace as the `StackitCluster`.
+The provider does not merge the referenced data with node bootstrap data.
+Cloud-init user data is applied only when STACKIT creates a VM, so an existing
+bastion cannot be reconfigured in place. If the referenced ConfigMap or Secret
+content changes, the provider deletes and recreates the provider-managed
+bastion VM with the new user data.
+
+Recreating the bastion temporarily interrupts SSH access, assigns a new
+provider-managed bastion server, and may assign a new public IP. The provider
+also removes the old node SSH security group path and recreates it for the new
+bastion so control-plane and worker nodes remain reachable through the current
+bastion after reconciliation completes.
 
 ## Get the bastion IP
 

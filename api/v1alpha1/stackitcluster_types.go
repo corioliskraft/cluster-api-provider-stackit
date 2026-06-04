@@ -124,6 +124,30 @@ type StackitBastionSpec struct {
 	// rootVolume configures the bastion root disk.
 	// +optional
 	RootVolume StackitRootVolumeSpec `json:"rootVolume,omitempty"`
+
+	// cloudInitRef references cloud-init user data passed to the bastion VM.
+	// It can point to a ConfigMap for non-sensitive configuration or a Secret
+	// when the cloud-init document contains sensitive values.
+	// +optional
+	CloudInitRef *StackitBastionCloudInitRef `json:"cloudInitRef,omitempty"`
+}
+
+// StackitBastionCloudInitRef references cloud-init user data for the bastion.
+type StackitBastionCloudInitRef struct {
+	// kind is the Kubernetes object kind containing the cloud-init document.
+	// +required
+	// +kubebuilder:validation:Enum=ConfigMap;Secret
+	Kind string `json:"kind"`
+
+	// name is the ConfigMap or Secret name in the StackitCluster namespace.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// key is the data key containing the cloud-init document.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Key string `json:"key"`
 }
 
 // StackitClusterStatus defines the observed state of StackitCluster.
@@ -186,6 +210,11 @@ type StackitBastionStatus struct {
 	// securityGroupID is the provider-managed bastion security group ID.
 	// +optional
 	SecurityGroupID string `json:"securityGroupID,omitempty"`
+
+	// cloudInitHash records the resolved cloudInitRef content used to create
+	// the current provider-managed bastion server.
+	// +optional
+	CloudInitHash string `json:"cloudInitHash,omitempty"`
 }
 
 // Condition types maintained by the StackitClusterReconciler.

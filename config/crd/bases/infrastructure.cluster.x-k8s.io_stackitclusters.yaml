@@ -82,6 +82,34 @@ spec:
                       format: cidr
                       type: string
                     type: array
+                  cloudInitRef:
+                    description: |-
+                      cloudInitRef references cloud-init user data passed to the bastion VM.
+                      It can point to a ConfigMap for non-sensitive configuration or a Secret
+                      when the cloud-init document contains sensitive values.
+                    properties:
+                      key:
+                        description: key is the data key containing the cloud-init
+                          document.
+                        minLength: 1
+                        type: string
+                      kind:
+                        description: kind is the Kubernetes object kind containing
+                          the cloud-init document.
+                        enum:
+                        - ConfigMap
+                        - Secret
+                        type: string
+                      name:
+                        description: name is the ConfigMap or Secret name in the StackitCluster
+                          namespace.
+                        minLength: 1
+                        type: string
+                    required:
+                    - key
+                    - kind
+                    - name
+                    type: object
                   enabled:
                     description: enabled toggles creation of a provider-managed SSH
                       bastion host.
@@ -233,6 +261,11 @@ spec:
               bastion:
                 description: bastion stores observed provider-managed bastion resources.
                 properties:
+                  cloudInitHash:
+                    description: |-
+                      cloudInitHash records the resolved cloudInitRef content used to create
+                      the current provider-managed bastion server.
+                    type: string
                   publicIP:
                     description: publicIP is the routable IP address users connect
                       to.

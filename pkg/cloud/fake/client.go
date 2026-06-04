@@ -64,6 +64,7 @@ type serverEntry struct {
 	server         *cloud.Server
 	tags           map[string]string
 	securityGroups map[string]struct{}
+	userData       []byte
 }
 
 type lbEntry struct {
@@ -190,6 +191,7 @@ func (c *Client) CreateServer(_ context.Context, input cloud.CreateServerInput) 
 		server:         server,
 		tags:           copyTags(input.Tags),
 		securityGroups: securityGroupSet(input.SecurityGroups),
+		userData:       append([]byte(nil), input.UserData...),
 	}
 	c.CreateServerCalls++
 	return cloneServer(server), nil
@@ -267,6 +269,7 @@ func (c *Client) EnsureBastion(_ context.Context, input cloud.BastionInput) (*cl
 		server:         server,
 		tags:           copyTags(input.Tags),
 		securityGroups: securityGroupSet([]string{securityGroupID}),
+		userData:       append([]byte(nil), input.CloudInit...),
 	}
 
 	publicIPID := c.genID()
@@ -544,6 +547,17 @@ func (c *Client) ServerHasSecurityGroup(serverID, securityGroupID string) bool {
 	}
 	_, ok = entry.securityGroups[securityGroupID]
 	return ok
+}
+
+// ServerUserData returns the user-data stored for a fake server.
+func (c *Client) ServerUserData(serverID string) []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.servers[serverID]
+	if !ok {
+		return nil
+	}
+	return append([]byte(nil), entry.userData...)
 }
 
 // SecurityGroupRemoteSources returns the remote security groups allowed by the

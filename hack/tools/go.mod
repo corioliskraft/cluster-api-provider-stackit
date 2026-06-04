@@ -7,6 +7,7 @@ require sigs.k8s.io/cluster-api/hack/tools v0.0.0-20250520093716-525566440a77 //
 tool (
 	sigs.k8s.io/cluster-api/hack/tools/mdbook/embed
 	sigs.k8s.io/cluster-api/hack/tools/mdbook/releaselink
+	sigs.k8s.io/cluster-api/hack/tools/mdbook/tabulate
 )
 
 require (

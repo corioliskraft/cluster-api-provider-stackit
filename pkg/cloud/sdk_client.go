@@ -249,6 +249,7 @@ func (c *SDKClient) EnsureBastion(ctx context.Context, input BastionInput) (*Bas
 		SSHKeyName:     input.SSHKeyName,
 		NetworkID:      input.NetworkID,
 		SecurityGroups: []string{securityGroup.ID},
+		UserData:       input.CloudInit,
 		Tags:           input.Tags,
 		RootVolume:     input.RootVolume,
 	})

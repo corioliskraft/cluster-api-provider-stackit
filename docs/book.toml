@@ -12,3 +12,6 @@ admonitions = true
 
 [preprocessor.embed]
 command = "mdbook-embed"
+
+[preprocessor.tabulate]
+command = "mdbook-tabulate"

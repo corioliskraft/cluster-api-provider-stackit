@@ -71,6 +71,61 @@ spec:
                               load balancer.
                             type: boolean
                         type: object
+                      bastion:
+                        description: bastion configures an optional provider-managed
+                          SSH bastion host.
+                        properties:
+                          allowedCIDRs:
+                            description: |-
+                              allowedCIDRs are CIDR ranges allowed to connect to TCP/22 on the bastion.
+                              Required when enabled is true.
+                            items:
+                              format: cidr
+                              type: string
+                            type: array
+                          enabled:
+                            description: enabled toggles creation of a provider-managed
+                              SSH bastion host.
+                            type: boolean
+                          imageID:
+                            description: |-
+                              imageID is the ID of the STACKIT image to boot the bastion from.
+                              Required when enabled is true.
+                            pattern: ^[0-9a-fA-F-]{36}$
+                            type: string
+                          machineType:
+                            description: |-
+                              machineType selects the STACKIT machine flavor for the bastion VM.
+                              Required when enabled is true.
+                            pattern: ^[a-z0-9][a-z0-9.-]*[a-z0-9]$
+                            type: string
+                          rootVolume:
+                            description: rootVolume configures the bastion root disk.
+                            properties:
+                              deleteOnTermination:
+                                description: |-
+                                  deleteOnTermination causes the root volume to be deleted when the VM is
+                                  deleted.
+                                type: boolean
+                              performanceClass:
+                                description: performanceClass selects a STACKIT storage
+                                  performance class.
+                                minLength: 1
+                                type: string
+                              sizeGiB:
+                                description: sizeGiB is the size of the root volume
+                                  in GiB.
+                                minimum: 0
+                                type: integer
+                            type: object
+                          sshKeyName:
+                            description: |-
+                              sshKeyName is the name of an existing SSH key in the STACKIT project.
+                              Required when enabled is true.
+                            maxLength: 127
+                            pattern: ^[A-Za-z0-9_.@-]+$
+                            type: string
+                        type: object
                       controlPlaneEndpoint:
                         description: |-
                           controlPlaneEndpoint allows the user to provide a pre-existing endpoint
@@ -146,6 +201,15 @@ spec:
                         && self.apiServerLoadBalancer.enabled ? true : has(self.controlPlaneEndpoint)
                         && has(self.controlPlaneEndpoint.host) && size(self.controlPlaneEndpoint.host)
                         > 0'
+                    - message: bastion.imageID, bastion.machineType, bastion.sshKeyName,
+                        and bastion.allowedCIDRs are required when bastion.enabled
+                        is true
+                      rule: '!has(self.bastion) || !has(self.bastion.enabled) || !self.bastion.enabled
+                        || (has(self.bastion.imageID) && size(self.bastion.imageID)
+                        > 0 && has(self.bastion.machineType) && size(self.bastion.machineType)
+                        > 0 && has(self.bastion.sshKeyName) && size(self.bastion.sshKeyName)
+                        > 0 && has(self.bastion.allowedCIDRs) && size(self.bastion.allowedCIDRs)
+                        > 0)'
                 required:
                 - spec
                 type: object

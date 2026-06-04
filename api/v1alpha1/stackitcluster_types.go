@@ -29,6 +29,7 @@ const ClusterFinalizer = "stackitcluster.infrastructure.cluster.x-k8s.io"
 // StackitClusterSpec defines the desired state of StackitCluster.
 // +kubebuilder:validation:XValidation:rule="has(self.credentialsSecretRef.name) && size(self.credentialsSecretRef.name) > 0",message="credentialsSecretRef.name is required"
 // +kubebuilder:validation:XValidation:rule="has(self.apiServerLoadBalancer) && has(self.apiServerLoadBalancer.enabled) && self.apiServerLoadBalancer.enabled ? true : has(self.controlPlaneEndpoint) && has(self.controlPlaneEndpoint.host) && size(self.controlPlaneEndpoint.host) > 0",message="controlPlaneEndpoint.host is required when apiServerLoadBalancer.enabled is false"
+// +kubebuilder:validation:XValidation:rule="!has(self.bastion) || !has(self.bastion.enabled) || !self.bastion.enabled || (has(self.bastion.imageID) && size(self.bastion.imageID) > 0 && has(self.bastion.machineType) && size(self.bastion.machineType) > 0 && has(self.bastion.sshKeyName) && size(self.bastion.sshKeyName) > 0 && has(self.bastion.allowedCIDRs) && size(self.bastion.allowedCIDRs) > 0)",message="bastion.imageID, bastion.machineType, bastion.sshKeyName, and bastion.allowedCIDRs are required when bastion.enabled is true"
 type StackitClusterSpec struct {
 	// projectID is the STACKIT project that owns the cluster infrastructure.
 	// +required
@@ -61,6 +62,10 @@ type StackitClusterSpec struct {
 	// +optional
 	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty,omitzero"`
 
+	// bastion configures an optional provider-managed SSH bastion host.
+	// +optional
+	Bastion StackitBastionSpec `json:"bastion,omitempty"`
+
 	// additionalLabels is merged into the labels applied to cluster-wide
 	// STACKIT resources such as the API server load balancer.
 	// +optional
@@ -85,6 +90,42 @@ type StackitAPIServerLoadBalancerSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
 }
 
+// StackitBastionSpec configures an optional provider-managed SSH bastion host.
+type StackitBastionSpec struct {
+	// enabled toggles creation of a provider-managed SSH bastion host.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// imageID is the ID of the STACKIT image to boot the bastion from.
+	// Required when enabled is true.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F-]{36}$`
+	ImageID string `json:"imageID,omitempty"`
+
+	// machineType selects the STACKIT machine flavor for the bastion VM.
+	// Required when enabled is true.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z0-9][a-z0-9.-]*[a-z0-9]$`
+	MachineType string `json:"machineType,omitempty"`
+
+	// sshKeyName is the name of an existing SSH key in the STACKIT project.
+	// Required when enabled is true.
+	// +optional
+	// +kubebuilder:validation:MaxLength=127
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_.@-]+$`
+	SSHKeyName string `json:"sshKeyName,omitempty"`
+
+	// allowedCIDRs are CIDR ranges allowed to connect to TCP/22 on the bastion.
+	// Required when enabled is true.
+	// +optional
+	// +kubebuilder:validation:items:Format=cidr
+	AllowedCIDRs []string `json:"allowedCIDRs,omitempty"`
+
+	// rootVolume configures the bastion root disk.
+	// +optional
+	RootVolume StackitRootVolumeSpec `json:"rootVolume,omitempty"`
+}
+
 // StackitClusterStatus defines the observed state of StackitCluster.
 type StackitClusterStatus struct {
 	// ready indicates that the infrastructure required for the cluster is ready.
@@ -103,6 +144,10 @@ type StackitClusterStatus struct {
 	// load balancer so it can be deleted on cluster teardown.
 	// +optional
 	APIServerLoadBalancerID string `json:"apiServerLoadBalancerID,omitempty"`
+
+	// bastion stores observed provider-managed bastion resources.
+	// +optional
+	Bastion StackitBastionStatus `json:"bastion,omitempty"`
 
 	// failureDomains is a list of availability zones available to the cluster.
 	// +listType=map
@@ -124,17 +169,40 @@ type StackitClusterInitializationStatus struct {
 	Provisioned bool `json:"provisioned,omitempty"`
 }
 
+// StackitBastionStatus holds provider-managed bastion resource IDs.
+type StackitBastionStatus struct {
+	// serverID is the provider-managed bastion server ID.
+	// +optional
+	ServerID string `json:"serverID,omitempty"`
+
+	// publicIPID is the provider-managed public IP resource ID.
+	// +optional
+	PublicIPID string `json:"publicIPID,omitempty"`
+
+	// publicIP is the routable IP address users connect to.
+	// +optional
+	PublicIP string `json:"publicIP,omitempty"`
+
+	// securityGroupID is the provider-managed bastion security group ID.
+	// +optional
+	SecurityGroupID string `json:"securityGroupID,omitempty"`
+}
+
 // Condition types maintained by the StackitClusterReconciler.
 const (
 	ClusterReadyCondition             = "Ready"
 	ClusterNetworkReadyCondition      = "NetworkReady"
 	ClusterLoadBalancerReadyCondition = "LoadBalancerReady"
 	ClusterCredentialsReadyCondition  = "CredentialsReady"
+	ClusterBastionReadyCondition      = "BastionReady"
 )
 
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=stackitclusters,shortName=stic,scope=Namespaced,categories=cluster-api
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=".status.ready"
+// +kubebuilder:printcolumn:name="Endpoint",type=string,JSONPath=".status.apiServerEndpoint.host"
+// +kubebuilder:printcolumn:name="Bastion IP",type=string,JSONPath=".status.bastion.publicIP"
 // +kubebuilder:storageversion
 
 // StackitCluster is the Schema for the stackitclusters API.

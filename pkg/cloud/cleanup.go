@@ -25,6 +25,15 @@ func CleanupByTags(ctx context.Context, client Client, tags map[string]string) e
 	}
 
 	var errs []string
+	bastionTags := make(map[string]string, len(tags)+1)
+	for key, value := range tags {
+		bastionTags[key] = value
+	}
+	bastionTags["cluster-api-provider-stackit/resource-role"] = "bastion"
+	if err := client.DeleteBastion(ctx, BastionInput{Tags: bastionTags}, Bastion{}); err != nil && !IsNotFound(err) {
+		errs = append(errs, fmt.Sprintf("delete bastion resources: %v", err))
+	}
+
 	loadBalancers, err := client.ListAPIServerLoadBalancersByTags(ctx, tags)
 	if err != nil {
 		errs = append(errs, err.Error())

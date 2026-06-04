@@ -44,6 +44,28 @@ type LoadBalancer struct {
 	Port    int32
 }
 
+// PublicIP describes a STACKIT public IP resource.
+type PublicIP struct {
+	ID                 string
+	IP                 string
+	NetworkInterfaceID string
+}
+
+// SecurityGroup describes a STACKIT security group.
+type SecurityGroup struct {
+	ID   string
+	Name string
+}
+
+// Bastion describes the provider-managed SSH bastion resources.
+type Bastion struct {
+	ServerID        string
+	ServerState     string
+	PublicIPID      string
+	PublicIP        string
+	SecurityGroupID string
+}
+
 // CreateServerInput holds all parameters required to create a new VM.
 type CreateServerInput struct {
 	Name             string
@@ -58,6 +80,20 @@ type CreateServerInput struct {
 	UserData         []byte
 	Tags             map[string]string
 	RootVolume       RootVolumeInput
+}
+
+// BastionInput holds all parameters required to ensure a bastion host.
+type BastionInput struct {
+	Name         string
+	ProjectID    string
+	Region       string
+	NetworkID    string
+	ImageID      string
+	MachineType  string
+	SSHKeyName   string
+	AllowedCIDRs []string
+	Tags         map[string]string
+	RootVolume   RootVolumeInput
 }
 
 // RootVolumeInput describes the root disk of a VM.

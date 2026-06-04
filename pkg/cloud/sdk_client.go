@@ -35,6 +35,8 @@ const (
 	apiserverListenerName   = "apiserver"
 	bootstrapTargetName     = "capi-bootstrap-placeholder"
 	bootstrapTargetIP       = "10.0.0.1"
+	sshPort                 = 22
+	tcpProtocol             = "tcp"
 )
 
 // SDKClient is the STACKIT SDK-backed implementation of Client.
@@ -219,6 +221,184 @@ func (c *SDKClient) GetNetwork(ctx context.Context, id string) (*Network, error)
 	}, nil
 }
 
+func (c *SDKClient) EnsureBastion(ctx context.Context, input BastionInput) (*Bastion, error) {
+	if input.Name == "" || input.NetworkID == "" || input.ImageID == "" || input.MachineType == "" || input.SSHKeyName == "" {
+		return nil, fmt.Errorf("%w: bastion name, network ID, image ID, machine type, and SSH key name are required", ErrInvalidInput)
+	}
+	if len(input.AllowedCIDRs) == 0 {
+		return nil, fmt.Errorf("%w: bastion allowed CIDRs are required", ErrInvalidInput)
+	}
+	if len(input.Tags) == 0 {
+		return nil, fmt.Errorf("%w: bastion tags are required", ErrInvalidInput)
+	}
+
+	securityGroup, err := c.ensureBastionSecurityGroup(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ensureBastionSecurityGroupRules(ctx, securityGroup.ID, input.AllowedCIDRs); err != nil {
+		return nil, err
+	}
+
+	server, err := c.CreateServer(ctx, CreateServerInput{
+		Name:           input.Name,
+		ProjectID:      input.ProjectID,
+		Region:         input.Region,
+		ImageID:        input.ImageID,
+		MachineType:    input.MachineType,
+		SSHKeyName:     input.SSHKeyName,
+		NetworkID:      input.NetworkID,
+		SecurityGroups: []string{securityGroup.ID},
+		Tags:           input.Tags,
+		RootVolume:     input.RootVolume,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := c.addSecurityGroupToServer(ctx, server.ID, securityGroup.ID); err != nil {
+		return nil, err
+	}
+
+	publicIP, err := c.ensurePublicIP(ctx, input.Tags)
+	if err != nil {
+		return nil, err
+	}
+	if publicIP.NetworkInterfaceID == "" {
+		if err := c.iaasClient.DefaultAPI.AddPublicIpToServer(ctx, c.projectID, c.region, server.ID, publicIP.ID).Execute(); err != nil {
+			err := classifySDKError("add public IP to server", err)
+			if !IsConflict(err) {
+				return nil, err
+			}
+		}
+		publicIP, err = c.getPublicIP(ctx, publicIP.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &Bastion{
+		ServerID:        server.ID,
+		ServerState:     server.State,
+		PublicIPID:      publicIP.ID,
+		PublicIP:        publicIP.IP,
+		SecurityGroupID: securityGroup.ID,
+	}, nil
+}
+
+func (c *SDKClient) DeleteBastion(ctx context.Context, input BastionInput, status Bastion) error {
+	serverID := status.ServerID
+	if serverID == "" {
+		server, err := c.FindServerByTags(ctx, input.Tags)
+		if err == nil {
+			serverID = server.ID
+		} else if !IsNotFound(err) {
+			return err
+		}
+	}
+
+	publicIPID := status.PublicIPID
+	if publicIPID == "" {
+		publicIP, err := c.findPublicIPByTags(ctx, input.Tags)
+		if err == nil {
+			publicIPID = publicIP.ID
+		} else if !IsNotFound(err) {
+			return err
+		}
+	}
+
+	securityGroupID := status.SecurityGroupID
+	if securityGroupID == "" {
+		securityGroup, err := c.findSecurityGroupByTags(ctx, input.Tags)
+		if err == nil {
+			securityGroupID = securityGroup.ID
+		} else if !IsNotFound(err) {
+			return err
+		}
+	}
+
+	if serverID != "" && publicIPID != "" {
+		if err := c.iaasClient.DefaultAPI.RemovePublicIpFromServer(ctx, c.projectID, c.region, serverID, publicIPID).Execute(); err != nil {
+			err := classifySDKError("remove public IP from server", err)
+			if !IsNotFound(err) && !IsConflict(err) {
+				return err
+			}
+		}
+	}
+	if serverID != "" && securityGroupID != "" {
+		if err := c.iaasClient.DefaultAPI.RemoveSecurityGroupFromServer(ctx, c.projectID, c.region, serverID, securityGroupID).Execute(); err != nil {
+			err := classifySDKError("remove security group from server", err)
+			if !IsNotFound(err) && !IsConflict(err) {
+				return err
+			}
+		}
+	}
+	if serverID != "" {
+		if err := c.DeleteServer(ctx, serverID); err != nil && !IsNotFound(err) {
+			return err
+		}
+	}
+	if publicIPID != "" {
+		if err := c.iaasClient.DefaultAPI.DeletePublicIP(ctx, c.projectID, c.region, publicIPID).Execute(); err != nil {
+			err := classifySDKError("delete public IP", err)
+			if !IsNotFound(err) {
+				return err
+			}
+		}
+	}
+	if securityGroupID != "" {
+		if err := c.deleteSecurityGroupRules(ctx, securityGroupID); err != nil {
+			return err
+		}
+		if err := c.iaasClient.DefaultAPI.DeleteSecurityGroup(ctx, c.projectID, c.region, securityGroupID).Execute(); err != nil {
+			err := classifySDKError("delete security group", err)
+			if !IsNotFound(err) {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c *SDKClient) ListPublicIPsByTags(ctx context.Context, tags map[string]string) ([]*PublicIP, error) {
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("%w: empty tag selector", ErrInvalidInput)
+	}
+	resp, err := c.iaasClient.DefaultAPI.ListPublicIPs(ctx, c.projectID, c.region).
+		LabelSelector(labelSelector(tags)).
+		Execute()
+	if err != nil {
+		return nil, classifySDKError("list public IPs", err)
+	}
+	matched := []*PublicIP{}
+	for _, publicIP := range resp.GetItems() {
+		if labelsContainTags(publicIP.GetLabels(), tags) {
+			publicIP := publicIP
+			matched = append(matched, publicIPFromSDK(&publicIP))
+		}
+	}
+	return matched, nil
+}
+
+func (c *SDKClient) ListSecurityGroupsByTags(ctx context.Context, tags map[string]string) ([]*SecurityGroup, error) {
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("%w: empty tag selector", ErrInvalidInput)
+	}
+	resp, err := c.iaasClient.DefaultAPI.ListSecurityGroups(ctx, c.projectID, c.region).
+		LabelSelector(labelSelector(tags)).
+		Execute()
+	if err != nil {
+		return nil, classifySDKError("list security groups", err)
+	}
+	matched := []*SecurityGroup{}
+	for _, securityGroup := range resp.GetItems() {
+		if labelsContainTags(securityGroup.GetLabels(), tags) {
+			securityGroup := securityGroup
+			matched = append(matched, securityGroupFromSDK(&securityGroup))
+		}
+	}
+	return matched, nil
+}
+
 func (c *SDKClient) EnsureAPIServerLoadBalancer(ctx context.Context, input LoadBalancerInput) (*LoadBalancer, error) {
 	if existing, err := c.findLoadBalancerByTags(ctx, input.Tags); err == nil {
 		return existing, nil
@@ -392,6 +572,157 @@ func (c *SDKClient) findLoadBalancerByTags(ctx context.Context, tags map[string]
 	return matched[0], nil
 }
 
+func (c *SDKClient) ensureBastionSecurityGroup(ctx context.Context, input BastionInput) (*SecurityGroup, error) {
+	if existing, err := c.findSecurityGroupByTags(ctx, input.Tags); err == nil {
+		return existing, nil
+	} else if !IsNotFound(err) {
+		return nil, err
+	}
+	payload := iaas.NewCreateSecurityGroupPayload(input.Name + "-ssh")
+	payload.SetDescription("Cluster API Provider STACKIT bastion SSH access")
+	payload.SetLabels(tagsToSDKLabels(input.Tags))
+	securityGroup, err := c.iaasClient.DefaultAPI.CreateSecurityGroup(ctx, c.projectID, c.region).
+		CreateSecurityGroupPayload(*payload).
+		Execute()
+	if err != nil {
+		return nil, classifySDKError("create security group", err)
+	}
+	return securityGroupFromSDK(securityGroup), nil
+}
+
+func (c *SDKClient) ensureBastionSecurityGroupRules(ctx context.Context, securityGroupID string, cidrs []string) error {
+	if securityGroupID == "" {
+		return fmt.Errorf("%w: security group ID is required", ErrInvalidInput)
+	}
+	resp, err := c.iaasClient.DefaultAPI.ListSecurityGroupRules(ctx, c.projectID, c.region, securityGroupID).Execute()
+	if err != nil {
+		return classifySDKError("list security group rules", err)
+	}
+	existingRules := resp.GetItems()
+	for _, cidr := range cidrs {
+		if cidr == "" {
+			return fmt.Errorf("%w: empty bastion allowed CIDR", ErrInvalidInput)
+		}
+		if hasSSHRule(existingRules, cidr) {
+			continue
+		}
+		protocol := iaas.StringAsCreateProtocol(ptrTo(tcpProtocol))
+		rule := iaas.NewCreateSecurityGroupRulePayload("ingress")
+		rule.SetIpRange(cidr)
+		rule.SetPortRange(*iaas.NewPortRange(sshPort, sshPort))
+		rule.SetProtocol(protocol)
+		if _, err := c.iaasClient.DefaultAPI.CreateSecurityGroupRule(ctx, c.projectID, c.region, securityGroupID).
+			CreateSecurityGroupRulePayload(*rule).
+			Execute(); err != nil {
+			return classifySDKError("create security group rule", err)
+		}
+	}
+	return nil
+}
+
+func (c *SDKClient) ensurePublicIP(ctx context.Context, tags map[string]string) (*PublicIP, error) {
+	if existing, err := c.findPublicIPByTags(ctx, tags); err == nil {
+		return existing, nil
+	} else if !IsNotFound(err) {
+		return nil, err
+	}
+	payload := iaas.NewCreatePublicIPPayload()
+	payload.SetLabels(tagsToSDKLabels(tags))
+	publicIP, err := c.iaasClient.DefaultAPI.CreatePublicIP(ctx, c.projectID, c.region).
+		CreatePublicIPPayload(*payload).
+		Execute()
+	if err != nil {
+		return nil, classifySDKError("create public IP", err)
+	}
+	return publicIPFromSDK(publicIP), nil
+}
+
+func (c *SDKClient) getPublicIP(ctx context.Context, id string) (*PublicIP, error) {
+	publicIP, err := c.iaasClient.DefaultAPI.GetPublicIP(ctx, c.projectID, c.region, id).Execute()
+	if err != nil {
+		return nil, classifySDKError("get public IP", err)
+	}
+	return publicIPFromSDK(publicIP), nil
+}
+
+func (c *SDKClient) findPublicIPByTags(ctx context.Context, tags map[string]string) (*PublicIP, error) {
+	matched, err := c.ListPublicIPsByTags(ctx, tags)
+	if err != nil {
+		return nil, err
+	}
+	if len(matched) == 0 {
+		return nil, fmt.Errorf("%w: no public IP matching tags", ErrNotFound)
+	}
+	if len(matched) > 1 {
+		return nil, fmt.Errorf("%w: multiple public IPs matching tags", ErrConflict)
+	}
+	return matched[0], nil
+}
+
+func (c *SDKClient) findSecurityGroupByTags(ctx context.Context, tags map[string]string) (*SecurityGroup, error) {
+	matched, err := c.ListSecurityGroupsByTags(ctx, tags)
+	if err != nil {
+		return nil, err
+	}
+	if len(matched) == 0 {
+		return nil, fmt.Errorf("%w: no security group matching tags", ErrNotFound)
+	}
+	if len(matched) > 1 {
+		return nil, fmt.Errorf("%w: multiple security groups matching tags", ErrConflict)
+	}
+	return matched[0], nil
+}
+
+func (c *SDKClient) addSecurityGroupToServer(ctx context.Context, serverID, securityGroupID string) error {
+	if err := c.iaasClient.DefaultAPI.AddSecurityGroupToServer(ctx, c.projectID, c.region, serverID, securityGroupID).Execute(); err != nil {
+		err := classifySDKError("add security group to server", err)
+		if !IsConflict(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *SDKClient) deleteSecurityGroupRules(ctx context.Context, securityGroupID string) error {
+	resp, err := c.iaasClient.DefaultAPI.ListSecurityGroupRules(ctx, c.projectID, c.region, securityGroupID).Execute()
+	if err != nil {
+		err := classifySDKError("list security group rules", err)
+		if IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	for _, rule := range resp.GetItems() {
+		ruleID := rule.GetId()
+		if ruleID == "" {
+			continue
+		}
+		if err := c.iaasClient.DefaultAPI.DeleteSecurityGroupRule(ctx, c.projectID, c.region, securityGroupID, ruleID).Execute(); err != nil {
+			err := classifySDKError("delete security group rule", err)
+			if !IsNotFound(err) {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func hasSSHRule(rules []iaas.SecurityGroupRule, cidr string) bool {
+	for _, rule := range rules {
+		if rule.GetDirection() != "ingress" || rule.GetIpRange() != cidr {
+			continue
+		}
+		portRange := rule.GetPortRange()
+		if portRange.GetMin() != sshPort || portRange.GetMax() != sshPort {
+			continue
+		}
+		if protocol, ok := rule.GetProtocolOk(); ok && protocol.GetName() == tcpProtocol {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *SDKClient) updateAPIServerTargetPool(
 	ctx context.Context,
 	loadBalancerID string,
@@ -462,6 +793,27 @@ func loadBalancerFromSDK(in *lb.LoadBalancer) *LoadBalancer {
 	}
 }
 
+func publicIPFromSDK(in *iaas.PublicIp) *PublicIP {
+	if in == nil {
+		return nil
+	}
+	return &PublicIP{
+		ID:                 in.GetId(),
+		IP:                 in.GetIp(),
+		NetworkInterfaceID: in.GetNetworkInterface(),
+	}
+}
+
+func securityGroupFromSDK(in *iaas.SecurityGroup) *SecurityGroup {
+	if in == nil {
+		return nil
+	}
+	return &SecurityGroup{
+		ID:   in.GetId(),
+		Name: in.GetName(),
+	}
+}
+
 func listenerPort(listeners []lb.Listener) int32 {
 	for _, listener := range listeners {
 		if port := listener.GetPort(); port > 0 {
@@ -521,6 +873,10 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func ptrTo[T any](value T) *T {
+	return &value
 }
 
 func classifySDKError(op string, err error) error {

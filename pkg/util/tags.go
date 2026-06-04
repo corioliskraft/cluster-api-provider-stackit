@@ -21,12 +21,14 @@ const (
 	LabelMachineUID       = "cluster.x-k8s.io/machine-uid"
 	LabelManagedBy        = "cluster.x-k8s.io/managed-by"
 	LabelProviderManaged  = "cluster-api-provider-stackit/managed"
+	LabelResourceRole     = "cluster-api-provider-stackit/resource-role"
 	LabelE2E              = "cluster-api-provider-stackit/e2e"
 	LabelTestID           = "cluster-api-provider-stackit/test-id"
 
 	// ManagedByValue identifies resources managed by this provider.
 	ManagedByValue       = "cluster-api-provider-stackit"
 	ProviderManagedValue = "true"
+	ResourceRoleBastion  = "bastion"
 	E2EValue             = "true"
 )
 

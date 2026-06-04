@@ -29,27 +29,32 @@ const (
 type Client struct {
 	mu sync.Mutex
 
-	servers       map[string]*serverEntry
-	loadBalancers map[string]*lbEntry
-	networks      map[string]*cloud.Network
+	servers        map[string]*serverEntry
+	loadBalancers  map[string]*lbEntry
+	publicIPs      map[string]*publicIPEntry
+	securityGroups map[string]*securityGroupEntry
+	networks       map[string]*cloud.Network
 
 	nextID int
 
 	// failure injection: if non-nil, the next call returns this error and the
 	// field is cleared.
-	FailNextCreateServer error
-	FailNextDeleteServer error
-	FailNextGetServer    error
-	FailNextFindServer   error
-	FailNextEnsureLB     error
-	FailNextDeleteLB     error
-	FailNextEnsureTarget error
-	FailNextDeleteTarget error
-	FailNextGetNetwork   error
+	FailNextCreateServer  error
+	FailNextDeleteServer  error
+	FailNextGetServer     error
+	FailNextFindServer    error
+	FailNextEnsureLB      error
+	FailNextDeleteLB      error
+	FailNextEnsureTarget  error
+	FailNextDeleteTarget  error
+	FailNextGetNetwork    error
+	FailNextEnsureBastion error
+	FailNextDeleteBastion error
 
 	// CreateServerCalls counts successful CreateServer calls (for idempotency
 	// assertions).
-	CreateServerCalls int
+	CreateServerCalls  int
+	EnsureBastionCalls int
 }
 
 type serverEntry struct {
@@ -63,12 +68,25 @@ type lbEntry struct {
 	targets map[string]string
 }
 
+type publicIPEntry struct {
+	publicIP *cloud.PublicIP
+	tags     map[string]string
+}
+
+type securityGroupEntry struct {
+	securityGroup *cloud.SecurityGroup
+	tags          map[string]string
+	allowedCIDRs  []string
+}
+
 // New returns a Client preconfigured with the given networks.
 func New(networks ...cloud.Network) *Client {
 	c := &Client{
-		servers:       make(map[string]*serverEntry),
-		loadBalancers: make(map[string]*lbEntry),
-		networks:      make(map[string]*cloud.Network),
+		servers:        make(map[string]*serverEntry),
+		loadBalancers:  make(map[string]*lbEntry),
+		publicIPs:      make(map[string]*publicIPEntry),
+		securityGroups: make(map[string]*securityGroupEntry),
+		networks:       make(map[string]*cloud.Network),
 	}
 	for i := range networks {
 		n := networks[i]
@@ -195,6 +213,135 @@ func (c *Client) GetNetwork(_ context.Context, id string) (*cloud.Network, error
 	return &out, nil
 }
 
+func (c *Client) EnsureBastion(_ context.Context, input cloud.BastionInput) (*cloud.Bastion, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := consume(&c.FailNextEnsureBastion); err != nil {
+		return nil, err
+	}
+	for _, serverEntry := range c.servers {
+		if len(input.Tags) > 0 && mapContains(serverEntry.tags, input.Tags) {
+			publicIP := c.publicIPByTags(input.Tags)
+			securityGroup := c.securityGroupByTags(input.Tags)
+			return &cloud.Bastion{
+				ServerID:        serverEntry.server.ID,
+				ServerState:     serverEntry.server.State,
+				PublicIPID:      idOfPublicIP(publicIP),
+				PublicIP:        ipOfPublicIP(publicIP),
+				SecurityGroupID: idOfSecurityGroup(securityGroup),
+			}, nil
+		}
+	}
+
+	securityGroupID := c.genID()
+	securityGroup := &cloud.SecurityGroup{
+		ID:   securityGroupID,
+		Name: input.Name + "-ssh",
+	}
+	c.securityGroups[securityGroupID] = &securityGroupEntry{
+		securityGroup: securityGroup,
+		tags:          copyTags(input.Tags),
+		allowedCIDRs:  append([]string(nil), input.AllowedCIDRs...),
+	}
+
+	serverID := c.genID()
+	server := &cloud.Server{
+		ID:    serverID,
+		Name:  input.Name,
+		State: "ACTIVE",
+		Addresses: []cloud.Address{
+			{Type: "InternalIP", Address: "10.0.0.20"},
+		},
+	}
+	c.servers[serverID] = &serverEntry{server: server, tags: copyTags(input.Tags)}
+
+	publicIPID := c.genID()
+	publicIP := &cloud.PublicIP{
+		ID:                 publicIPID,
+		IP:                 "203.0.113.22",
+		NetworkInterfaceID: "fake-nic-" + serverID,
+	}
+	c.publicIPs[publicIPID] = &publicIPEntry{publicIP: publicIP, tags: copyTags(input.Tags)}
+
+	c.EnsureBastionCalls++
+	return &cloud.Bastion{
+		ServerID:        serverID,
+		ServerState:     server.State,
+		PublicIPID:      publicIPID,
+		PublicIP:        publicIP.IP,
+		SecurityGroupID: securityGroupID,
+	}, nil
+}
+
+func (c *Client) DeleteBastion(_ context.Context, input cloud.BastionInput, status cloud.Bastion) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := consume(&c.FailNextDeleteBastion); err != nil {
+		return err
+	}
+	if status.ServerID != "" {
+		delete(c.servers, status.ServerID)
+	}
+	if status.PublicIPID != "" {
+		delete(c.publicIPs, status.PublicIPID)
+	}
+	if status.SecurityGroupID != "" {
+		delete(c.securityGroups, status.SecurityGroupID)
+	}
+	for id, entry := range c.servers {
+		if mapContains(entry.tags, input.Tags) {
+			delete(c.servers, id)
+		}
+	}
+	for id, entry := range c.publicIPs {
+		if mapContains(entry.tags, input.Tags) {
+			delete(c.publicIPs, id)
+		}
+	}
+	for id, entry := range c.securityGroups {
+		if mapContains(entry.tags, input.Tags) {
+			delete(c.securityGroups, id)
+		}
+	}
+	return nil
+}
+
+func (c *Client) ListPublicIPsByTags(_ context.Context, tags map[string]string) ([]*cloud.PublicIP, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("empty tags: %w", cloud.ErrInvalidInput)
+	}
+	publicIPs := []*cloud.PublicIP{}
+	for _, entry := range c.publicIPs {
+		if mapContains(entry.tags, tags) {
+			out := *entry.publicIP
+			publicIPs = append(publicIPs, &out)
+		}
+	}
+	return publicIPs, nil
+}
+
+func (c *Client) ListSecurityGroupsByTags(_ context.Context, tags map[string]string) ([]*cloud.SecurityGroup, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("empty tags: %w", cloud.ErrInvalidInput)
+	}
+	securityGroups := []*cloud.SecurityGroup{}
+	for _, entry := range c.securityGroups {
+		if mapContains(entry.tags, tags) {
+			out := *entry.securityGroup
+			securityGroups = append(securityGroups, &out)
+		}
+	}
+	return securityGroups, nil
+}
+
 func (c *Client) EnsureAPIServerLoadBalancer(_ context.Context, input cloud.LoadBalancerInput) (*cloud.LoadBalancer, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -304,6 +451,20 @@ func (c *Client) LoadBalancerCount() int {
 	return len(c.loadBalancers)
 }
 
+// PublicIPCount returns the number of currently tracked public IPs.
+func (c *Client) PublicIPCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.publicIPs)
+}
+
+// SecurityGroupCount returns the number of currently tracked security groups.
+func (c *Client) SecurityGroupCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.securityGroups)
+}
+
 // LoadBalancerTargetCount returns the number of targets in one load balancer
 // target pool (test helper).
 func (c *Client) LoadBalancerTargetCount(id string) int {
@@ -334,6 +495,47 @@ func copyTags(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func (c *Client) publicIPByTags(tags map[string]string) *cloud.PublicIP {
+	for _, entry := range c.publicIPs {
+		if mapContains(entry.tags, tags) {
+			out := *entry.publicIP
+			return &out
+		}
+	}
+	return nil
+}
+
+func (c *Client) securityGroupByTags(tags map[string]string) *cloud.SecurityGroup {
+	for _, entry := range c.securityGroups {
+		if mapContains(entry.tags, tags) {
+			out := *entry.securityGroup
+			return &out
+		}
+	}
+	return nil
+}
+
+func idOfPublicIP(publicIP *cloud.PublicIP) string {
+	if publicIP == nil {
+		return ""
+	}
+	return publicIP.ID
+}
+
+func ipOfPublicIP(publicIP *cloud.PublicIP) string {
+	if publicIP == nil {
+		return ""
+	}
+	return publicIP.IP
+}
+
+func idOfSecurityGroup(securityGroup *cloud.SecurityGroup) string {
+	if securityGroup == nil {
+		return ""
+	}
+	return securityGroup.ID
 }
 
 func cloneServer(s *cloud.Server) *cloud.Server {

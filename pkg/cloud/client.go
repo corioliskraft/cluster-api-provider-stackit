@@ -35,6 +35,14 @@ type Client interface {
 
 	GetNetwork(ctx context.Context, id string) (*Network, error)
 
+	EnsureBastion(ctx context.Context, input BastionInput) (*Bastion, error)
+
+	DeleteBastion(ctx context.Context, input BastionInput, status Bastion) error
+
+	ListPublicIPsByTags(ctx context.Context, tags map[string]string) ([]*PublicIP, error)
+
+	ListSecurityGroupsByTags(ctx context.Context, tags map[string]string) ([]*SecurityGroup, error)
+
 	EnsureAPIServerLoadBalancer(ctx context.Context, input LoadBalancerInput) (*LoadBalancer, error)
 
 	ListAPIServerLoadBalancersByTags(ctx context.Context, tags map[string]string) ([]*LoadBalancer, error)

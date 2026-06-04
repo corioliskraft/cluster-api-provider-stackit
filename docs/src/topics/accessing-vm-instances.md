@@ -140,3 +140,65 @@ The provider deletes the managed bastion server, public IP, security group, and
 security group rules when the `StackitCluster` is deleted. It also deletes
 previously recorded managed bastion resources when `spec.bastion.enabled` is
 changed from `true` to `false`.
+
+
+## Additional Notes
+
+### Using the STACKIT CLI instead of `kubectl`
+
+It is also possible to use STACKIT CLI commands instead of `kubectl` to gather information about the cluster nodes.
+
+For example, to use the STACKIT CLI to get the public IP address of the SSH bastion host, use this STACKIT CLI command:
+
+```bash
+set CLUSTER_NAME stackit-bastion-test
+
+stackit server list -o json | jq -r --arg cluster "$CLUSTER_NAME" '
+    .[]
+    | select(.labels["cluster.x-k8s.io/cluster-name"] == $cluster)
+    | select(.labels["cluster-api-provider-stackit/resource-role"] == "bastion")
+    | .nics[]?.publicIp
+'
+188.34.94.28
+```
+
+You should substitute the correct cluster name for `<CLUSTER_NAME>` in the above command.
+
+Similarly, to obtain the list of private IP addresses of the cluster nodes, use this STACKIT CLI command:
+
+```bash
+set CLUSTER_NAME stackit-bastion-test
+
+stackit server list -o json | jq -r --arg cluster "$CLUSTER_NAME" '
+  .[]
+  | select(.labels["cluster.x-k8s.io/cluster-name"] == $cluster)
+  | select(.labels["cluster-api-provider-stackit/resource-role"] != "bastion")
+  | .nics[]?.ipv4
+'
+```
+
+For names plus private IPs:
+
+```bash
+stackit server list -o json | jq -r --arg cluster "$CLUSTER_NAME" '
+  .[]
+  | select(.labels["cluster.x-k8s.io/cluster-name"] == $cluster)
+  | select(.labels["cluster-api-provider-stackit/resource-role"] != "bastion")
+  | [.name, (.nics[]?.ipv4 // empty)]
+  | @tsv
+'
+```
+
+Finally, to obtain STACKIT instance names mapped with their private IPs, you can use this STACKIT CLI command:
+
+```bash
+stackit server list -o json | jq -r --arg cluster "$CLUSTER_NAME" '
+  .[]
+  | select(.labels["cluster.x-k8s.io/cluster-name"] == $cluster)
+  | select(.labels["cluster-api-provider-stackit/resource-role"] != "bastion")
+  | [.name, (.nics[]?.ipv4 // empty)]
+  | @tsv
+'
+```
+
+Note that your STACKIT CLI must be configured with credentials that enable you to query the STACKIT Servers API.

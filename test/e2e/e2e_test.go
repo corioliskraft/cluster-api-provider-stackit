@@ -411,6 +411,20 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(output).To(Equal("true"))
 			}, 15*time.Minute, 10*time.Second).Should(Succeed())
 
+			if cfg.BastionEnabled {
+				By("verifying the bastion public IP and security group exist")
+				Eventually(func(g Gomega) {
+					output := kubectlOutput(g, "get", "stackitcluster", clusterName, "-n", cfg.Namespace, "-o", "jsonpath={.status.bastion.publicIP}")
+					g.Expect(output).NotTo(BeEmpty())
+					publicIPs, err := cloudClient.ListPublicIPsByTags(ctx, stackitE2EBastionTags(testID))
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(publicIPs).To(HaveLen(1))
+					securityGroups, err := cloudClient.ListSecurityGroupsByTags(ctx, stackitE2EBastionTags(testID))
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(securityGroups).To(HaveLen(1))
+				}, 10*time.Minute, 15*time.Second).Should(Succeed())
+			}
+
 			By("waiting for one control-plane and one worker StackitMachine to provision")
 			var instanceIDs []string
 			Eventually(func(g Gomega) {
@@ -459,6 +473,12 @@ var _ = Describe("Manager", Ordered, func() {
 				loadBalancers, err := cloudClient.ListAPIServerLoadBalancersByTags(ctx, leakTags)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(loadBalancers).To(BeEmpty())
+				publicIPs, err := cloudClient.ListPublicIPsByTags(ctx, stackitE2EBastionTags(testID))
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(publicIPs).To(BeEmpty())
+				securityGroups, err := cloudClient.ListSecurityGroupsByTags(ctx, stackitE2EBastionTags(testID))
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(securityGroups).To(BeEmpty())
 			}, 20*time.Minute, 15*time.Second).Should(Succeed())
 		})
 
@@ -1305,6 +1325,11 @@ type stackitVMConfig struct {
 	AvailabilityZone      string
 	SSHKeyName            string
 	SecurityGroupIDs      []string
+	BastionEnabled        bool
+	BastionImageID        string
+	BastionMachineType    string
+	BastionSSHKeyName     string
+	BastionAllowedCIDRs   []string
 	CredentialsSecretName string
 	CredentialsSecretNS   string
 	RootVolumeSizeGiB     string
@@ -1344,16 +1369,23 @@ type workloadReadinessOptions struct {
 }
 
 func stackitVMConfigFromEnv() stackitVMConfig {
+	imageID := requiredEnv("STACKIT_IMAGE_ID")
+	sshKeyName := os.Getenv("STACKIT_SSH_KEY_NAME")
 	return stackitVMConfig{
 		Namespace:             envDefault("STACKIT_E2E_NAMESPACE", "default"),
 		ProjectID:             requiredEnv("STACKIT_PROJECT_ID"),
 		Region:                envDefault("STACKIT_REGION", "eu01"),
 		NetworkID:             requiredEnv("STACKIT_NETWORK_ID"),
-		ImageID:               requiredEnv("STACKIT_IMAGE_ID"),
+		ImageID:               imageID,
 		MachineType:           stackitE2EMachineType,
 		AvailabilityZone:      requiredEnv("STACKIT_AVAILABILITY_ZONE"),
-		SSHKeyName:            os.Getenv("STACKIT_SSH_KEY_NAME"),
+		SSHKeyName:            sshKeyName,
 		SecurityGroupIDs:      splitCSV(os.Getenv("STACKIT_SECURITY_GROUP_IDS")),
+		BastionEnabled:        os.Getenv("STACKIT_E2E_BASTION") == "true",
+		BastionImageID:        envDefault("STACKIT_BASTION_IMAGE_ID", imageID),
+		BastionMachineType:    envDefault("STACKIT_BASTION_MACHINE_TYPE", "c2i.1"),
+		BastionSSHKeyName:     envDefault("STACKIT_BASTION_SSH_KEY_NAME", sshKeyName),
+		BastionAllowedCIDRs:   splitCSV(envDefault("STACKIT_BASTION_ALLOWED_CIDRS", "0.0.0.0/0")),
 		CredentialsSecretName: envDefault("STACKIT_CREDENTIALS_SECRET_NAME", "stackit-credentials"),
 		CredentialsSecretNS:   envDefault("STACKIT_CREDENTIALS_SECRET_NAMESPACE", envDefault("STACKIT_E2E_NAMESPACE", "default")),
 		RootVolumeSizeGiB:     envDefault("STACKIT_ROOT_VOLUME_SIZE_GIB", "50"),
@@ -1405,7 +1437,7 @@ func renderStackitVMFixture(clusterName, machineName, testID string, cfg stackit
 
 	sshKeyName := ""
 	if cfg.SSHKeyName != "" {
-		sshKeyName = fmt.Sprintf("\n      sshKeyName: %s", cfg.SSHKeyName)
+		sshKeyName = fmt.Sprintf("\n  sshKeyName: %s", cfg.SSHKeyName)
 	}
 
 	return fmt.Sprintf(`apiVersion: cluster.x-k8s.io/v1beta2
@@ -1513,7 +1545,26 @@ func renderStackitClusterFixture(clusterName, testID string, cfg stackitVMConfig
 
 	sshKeyName := ""
 	if cfg.SSHKeyName != "" {
-		sshKeyName = fmt.Sprintf("\n      sshKeyName: %s", cfg.SSHKeyName)
+		sshKeyName = fmt.Sprintf("\n  sshKeyName: %s", cfg.SSHKeyName)
+	}
+	bastion := ""
+	if cfg.BastionEnabled {
+		Expect(cfg.BastionSSHKeyName).NotTo(BeEmpty(), "STACKIT_BASTION_SSH_KEY_NAME or STACKIT_SSH_KEY_NAME is required when STACKIT_E2E_BASTION=true")
+		allowedCIDRs := ""
+		for _, cidr := range cfg.BastionAllowedCIDRs {
+			allowedCIDRs += fmt.Sprintf("\n      - %s", cidr)
+		}
+		bastion = fmt.Sprintf(`
+  bastion:
+    enabled: true
+    imageID: %s
+    machineType: %s
+    sshKeyName: %s
+    allowedCIDRs:%s
+    rootVolume:
+      sizeGiB: %s
+      performanceClass: %s
+      deleteOnTermination: true`, cfg.BastionImageID, cfg.BastionMachineType, cfg.BastionSSHKeyName, allowedCIDRs, cfg.RootVolumeSizeGiB, cfg.RootVolumePerformance)
 	}
 	controlPlaneMachineName := clusterName + "-control-plane-0"
 	workerMachineName := clusterName + "-worker-0"
@@ -1557,7 +1608,7 @@ spec:
   network:
     id: %[10]s
   apiServerLoadBalancer:
-    enabled: true
+    enabled: true%[18]s
 ---
 apiVersion: v1
 kind: Secret
@@ -1661,7 +1712,7 @@ spec:
     id: %[10]s%[17]s
 `, clusterName, controlPlaneMachineName, workerMachineName, testID, cfg.Namespace, cfg.ProjectID, cfg.Region,
 		cfg.CredentialsSecretName, cfg.CredentialsSecretNS, cfg.NetworkID, cfg.ImageID, cfg.MachineType,
-		cfg.AvailabilityZone, sshKeyName, cfg.RootVolumeSizeGiB, cfg.RootVolumePerformance, securityGroups)
+		cfg.AvailabilityZone, sshKeyName, cfg.RootVolumeSizeGiB, cfg.RootVolumePerformance, securityGroups, bastion)
 }
 
 func renderStackitInfraOnlyMachineDeploymentFixture(clusterName, testID string, cfg stackitVMConfig, kubernetesVersion string) string {
@@ -1675,7 +1726,7 @@ func renderStackitInfraOnlyMachineDeploymentFixture(clusterName, testID string, 
 
 	sshKeyName := ""
 	if cfg.SSHKeyName != "" {
-		sshKeyName = fmt.Sprintf("\n      sshKeyName: %s", cfg.SSHKeyName)
+		sshKeyName = fmt.Sprintf("\n  sshKeyName: %s", cfg.SSHKeyName)
 	}
 
 	return fmt.Sprintf(`apiVersion: cluster.x-k8s.io/v1beta2
@@ -1863,7 +1914,7 @@ func renderKubeadmWorkloadClusterFixture(opts kubeadmWorkloadFixtureOptions) str
 
 	sshKeyName := ""
 	if cfg.SSHKeyName != "" {
-		sshKeyName = fmt.Sprintf("\n      sshKeyName: %s", cfg.SSHKeyName)
+		sshKeyName = fmt.Sprintf("\n  sshKeyName: %s", cfg.SSHKeyName)
 	}
 	kubernetesRepoMinor := kubernetesAptRepoMinor(kubernetesVersion)
 	controlPlanePreKubeadmCommands := indentBlock(kubeadmPackageInstallCommands(kubernetesRepoMinor), 6)
@@ -2207,6 +2258,12 @@ func stackitE2ETags(testID string) map[string]string {
 		util.LabelE2E:    util.E2EValue,
 		util.LabelTestID: testID,
 	}
+}
+
+func stackitE2EBastionTags(testID string) map[string]string {
+	tags := stackitE2ETags(testID)
+	tags[util.LabelResourceRole] = util.ResourceRoleBastion
+	return tags
 }
 
 func cleanupStackitClusterFixture(clusterName, namespace string) {

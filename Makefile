@@ -106,6 +106,12 @@ test-e2e-workload-noderef: setup-test-e2e manifests generate fmt vet ## Run bill
 		go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
 		--ginkgo.focus='align StackitMachine' --ginkgo.timeout=90m
 
+.PHONY: test-e2e-workload-bastion
+test-e2e-workload-bastion: setup-test-e2e manifests generate fmt vet ## Run billable workload Cluster lifecycle e2e with a provider-managed bastion.
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) STACKIT_E2E_CREATE_CLUSTER=true STACKIT_E2E_BASTION=true \
+		go test -timeout=90m -tags=e2e ./test/e2e -v -ginkgo.v \
+		--ginkgo.focus='create and delete.*workload Cluster' --ginkgo.timeout=90m
+
 .PHONY: test-e2e-workload-scale
 test-e2e-workload-scale: setup-test-e2e manifests generate fmt vet ## Run billable workload worker scale/Ready e2e. Requires STACKIT cloud env and credentials Secret.
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) STACKIT_E2E_SCALE_WORKLOAD=true \

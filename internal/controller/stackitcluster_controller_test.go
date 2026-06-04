@@ -116,6 +116,84 @@ var _ = Describe("StackitCluster Controller", func() {
 		expectCondition(got.Status.Conditions, infrav1.ClusterLoadBalancerReadyCondition, metav1.ConditionTrue, "Skipped")
 	})
 
+	It("creates the bastion and publishes its public IP when enabled", func() {
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Spec.Bastion = validBastionSpec()
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Ready).To(BeTrue())
+		Expect(got.Status.Bastion.ServerID).NotTo(BeEmpty())
+		Expect(got.Status.Bastion.PublicIPID).NotTo(BeEmpty())
+		Expect(got.Status.Bastion.PublicIP).To(Equal("203.0.113.22"))
+		Expect(got.Status.Bastion.SecurityGroupID).NotTo(BeEmpty())
+		Expect(fakeCloud.ServerCount()).To(Equal(1))
+		Expect(fakeCloud.PublicIPCount()).To(Equal(1))
+		Expect(fakeCloud.SecurityGroupCount()).To(Equal(1))
+		expectCondition(got.Status.Conditions, infrav1.ClusterBastionReadyCondition, metav1.ConditionTrue, "Available")
+	})
+
+	It("deletes existing bastion resources when bastion is disabled", func() {
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Spec.Bastion = validBastionSpec()
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+		_, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Spec.Bastion.Enabled = false
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Bastion).To(Equal(infrav1.StackitBastionStatus{}))
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+		Expect(fakeCloud.PublicIPCount()).To(Equal(0))
+		Expect(fakeCloud.SecurityGroupCount()).To(Equal(0))
+		expectCondition(got.Status.Conditions, infrav1.ClusterBastionReadyCondition, metav1.ConditionTrue, "Skipped")
+	})
+
+	It("deletes bastion resources during cluster deletion", func() {
+		got := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		got.Spec.Bastion = validBastionSpec()
+		Expect(k8sClient.Update(ctx, got)).To(Succeed())
+		_, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Bastion.PublicIP).NotTo(BeEmpty())
+		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
+
+		_, err = reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+		Expect(fakeCloud.PublicIPCount()).To(Equal(0))
+		Expect(fakeCloud.SecurityGroupCount()).To(Equal(0))
+		Eventually(func() bool {
+			err := k8sClient.Get(ctx, stackitKey, &infrav1.StackitCluster{})
+			return apierrors.IsNotFound(err)
+		}).Should(BeTrue())
+	})
+
+	It("validates bastion specs", func() {
+		spec := validBastionSpec()
+		Expect(validateBastionSpec(spec)).To(Succeed())
+
+		spec.AllowedCIDRs = []string{"not-a-cidr"}
+		Expect(validateBastionSpec(spec)).To(MatchError(ContainSubstring("invalid CIDR")))
+	})
+
 	It("marks the network not ready when the configured network does not exist", func() {
 		got := &infrav1.StackitCluster{}
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
@@ -299,5 +377,15 @@ func newStackitCluster(name, namespace string, lbEnabled bool) *infrav1.StackitC
 				Port: 6443,
 			},
 		},
+	}
+}
+
+func validBastionSpec() infrav1.StackitBastionSpec {
+	return infrav1.StackitBastionSpec{
+		Enabled:      true,
+		ImageID:      testImageID,
+		MachineType:  "c2i.1",
+		SSHKeyName:   "cluster-api-provider-stackit",
+		AllowedCIDRs: []string{"203.0.113.10/32"},
 	}
 }

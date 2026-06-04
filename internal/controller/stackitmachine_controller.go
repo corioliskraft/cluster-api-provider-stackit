@@ -199,6 +199,15 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
+	if err := r.reconcileBastionNodeSSHAccess(ctx, cloudClient, s, server); err != nil {
+		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
+			metav1.ConditionFalse, "BastionSSHAccessError", err.Error(), sm.Generation)
+		if cloud.IsRetryable(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
 	if err := r.reconcileAPIServerLoadBalancerTarget(ctx, cloudClient, s, server); err != nil {
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
 			metav1.ConditionFalse, "LoadBalancerTargetError", err.Error(), sm.Generation)
@@ -326,6 +335,30 @@ func (r *StackitMachineReconciler) ensureServer(
 			DeleteOnTermination: deleteOnTermination,
 		},
 	})
+}
+
+func (r *StackitMachineReconciler) reconcileBastionNodeSSHAccess(
+	ctx context.Context,
+	c cloud.Client,
+	s *scope.MachineScope,
+	server *cloud.Server,
+) error {
+	if !s.StackitCluster.Spec.Bastion.Enabled {
+		return nil
+	}
+	if s.StackitCluster.Status.Bastion.SecurityGroupID == "" {
+		return fmt.Errorf("%w: bastion security group ID is empty", cloud.ErrTransient)
+	}
+	if server == nil || server.ID == "" {
+		return fmt.Errorf("%w: server ID is empty", cloud.ErrTransient)
+	}
+	_, err := c.EnsureNodeSSHAccess(ctx, cloud.NodeSSHAccessInput{
+		Name:                   s.StackitCluster.Name + "-node-ssh",
+		ServerID:               server.ID,
+		BastionSecurityGroupID: s.StackitCluster.Status.Bastion.SecurityGroupID,
+		Tags:                   nodeSSHAccessTags(s.StackitCluster),
+	})
+	return err
 }
 
 func (r *StackitMachineReconciler) reconcileAPIServerLoadBalancerTarget(

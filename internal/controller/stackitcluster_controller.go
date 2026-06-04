@@ -286,6 +286,9 @@ func (r *StackitClusterReconciler) reconcileBastion(
 
 	if !sc.Spec.Bastion.Enabled {
 		if hasBastionStatus(sc.Status.Bastion) {
+			if err := cloudClient.DeleteNodeSSHAccess(ctx, nodeSSHAccessTags(sc)); err != nil {
+				return ctrl.Result{}, false, err
+			}
 			if err := cloudClient.DeleteBastion(ctx, input, status); err != nil {
 				return ctrl.Result{}, false, err
 			}
@@ -355,6 +358,9 @@ func (r *StackitClusterReconciler) reconcileDelete(ctx context.Context, s *scope
 			sc.Status.APIServerLoadBalancerID = ""
 		}
 		if hasBastionStatus(sc.Status.Bastion) {
+			if err := cloudClient.DeleteNodeSSHAccess(ctx, nodeSSHAccessTags(sc)); err != nil && !cloud.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
 			if err := cloudClient.DeleteBastion(ctx, bastionInput(sc), cloud.Bastion{
 				ServerID:        sc.Status.Bastion.ServerID,
 				PublicIPID:      sc.Status.Bastion.PublicIPID,
@@ -393,6 +399,12 @@ func bastionInput(sc *infrav1.StackitCluster) cloud.BastionInput {
 			DeleteOnTermination: deleteOnTermination,
 		},
 	}
+}
+
+func nodeSSHAccessTags(sc *infrav1.StackitCluster) map[string]string {
+	tags := util.ClusterTags(sc.Name, sc.Namespace, sc.Spec.AdditionalLabels)
+	tags[util.LabelResourceRole] = util.ResourceRoleNodeSSH
+	return tags
 }
 
 func validateBastionSpec(spec infrav1.StackitBastionSpec) error {

@@ -9,6 +9,11 @@ create one managed SSH bastion VM. The bastion is attached to the same STACKIT
 network as the cluster nodes, gets a provider-managed public IP, and has a
 provider-managed security group allowing TCP/22 only from configured CIDRs.
 
+When bastion access is enabled, the provider also manages the node-side SSH
+path: it creates a separate security group for cluster nodes, allows TCP/22
+from the bastion security group, and attaches that node SSH security group to
+control-plane and worker VMs.
+
 ## Prerequisites
 
 - The workload cluster was generated with `clusterctl generate cluster` and
@@ -71,6 +76,26 @@ spec:
 
 Leaving `StackitMachineTemplate.spec.template.spec.sshKeyName` empty is valid,
 but SSH to nodes through the bastion will not work.
+
+## How node SSH access is wired
+
+Enabling the bastion creates two provider-managed SSH security groups:
+
+- The bastion SSH security group is attached to the bastion VM. It allows
+  TCP/22 from `spec.bastion.allowedCIDRs`.
+- The node SSH security group is attached to each provider-managed
+  control-plane and worker VM. It allows TCP/22 from the bastion security
+  group by using the bastion security group as the remote source.
+
+This means users connect from their workstation to the bastion public IP, and
+then from the bastion to node internal IPs. The provider manages the network
+permissions for both hops, but it does not manage SSH users or private key
+files. The SSH key named on the bastion and node specs must already exist in
+STACKIT for the service account used by the provider.
+
+The node SSH security group is shared by all nodes in the cluster. New nodes
+created while bastion is enabled get the group attached during
+`StackitMachine` reconciliation.
 
 ## Get the bastion IP
 
@@ -137,9 +162,15 @@ Host 10.*
 ## Cleanup
 
 The provider deletes the managed bastion server, public IP, security group, and
-security group rules when the `StackitCluster` is deleted. It also deletes
-previously recorded managed bastion resources when `spec.bastion.enabled` is
-changed from `true` to `false`.
+security group rules when the `StackitCluster` is deleted. It also removes the
+provider-managed node SSH security group from cluster nodes and deletes that
+security group.
+
+The same cleanup path runs when `spec.bastion.enabled` is changed from `true`
+to `false`: the provider removes the node SSH security group from
+provider-managed control-plane and worker VMs, deletes the node SSH security
+group and its rules, and then deletes the bastion server, public IP, and
+bastion security group.
 
 
 ## Additional Notes

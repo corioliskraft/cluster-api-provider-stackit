@@ -96,6 +96,15 @@ type BastionInput struct {
 	RootVolume   RootVolumeInput
 }
 
+// NodeSSHAccessInput holds parameters required to allow SSH from the bastion
+// security group to cluster nodes.
+type NodeSSHAccessInput struct {
+	Name                   string
+	ServerID               string
+	BastionSecurityGroupID string
+	Tags                   map[string]string
+}
+
 // RootVolumeInput describes the root disk of a VM.
 type RootVolumeInput struct {
 	SizeGiB             int

@@ -29,6 +29,7 @@ const (
 	ManagedByValue       = "cluster-api-provider-stackit"
 	ProviderManagedValue = "true"
 	ResourceRoleBastion  = "bastion"
+	ResourceRoleNodeSSH  = "node-ssh"
 	E2EValue             = "true"
 )
 

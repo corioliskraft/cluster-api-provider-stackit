@@ -438,6 +438,15 @@ var _ = Describe("Manager", Ordered, func() {
 				}
 			}, 45*time.Minute, 15*time.Second).Should(Succeed())
 
+			if cfg.BastionEnabled {
+				By("verifying the node SSH security group exists")
+				Eventually(func(g Gomega) {
+					securityGroups, err := cloudClient.ListSecurityGroupsByTags(ctx, stackitE2ENodeSSHTags(testID))
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(securityGroups).To(HaveLen(1))
+				}, 10*time.Minute, 15*time.Second).Should(Succeed())
+			}
+
 			By("verifying both VMs exist in STACKIT")
 			for _, instanceID := range instanceIDs {
 				instanceID := instanceID
@@ -477,6 +486,9 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(publicIPs).To(BeEmpty())
 				securityGroups, err := cloudClient.ListSecurityGroupsByTags(ctx, stackitE2EBastionTags(testID))
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(securityGroups).To(BeEmpty())
+				securityGroups, err = cloudClient.ListSecurityGroupsByTags(ctx, stackitE2ENodeSSHTags(testID))
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(securityGroups).To(BeEmpty())
 			}, 20*time.Minute, 15*time.Second).Should(Succeed())
@@ -2263,6 +2275,12 @@ func stackitE2ETags(testID string) map[string]string {
 func stackitE2EBastionTags(testID string) map[string]string {
 	tags := stackitE2ETags(testID)
 	tags[util.LabelResourceRole] = util.ResourceRoleBastion
+	return tags
+}
+
+func stackitE2ENodeSSHTags(testID string) map[string]string {
+	tags := stackitE2ETags(testID)
+	tags[util.LabelResourceRole] = util.ResourceRoleNodeSSH
 	return tags
 }
 

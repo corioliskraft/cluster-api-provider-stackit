@@ -28,6 +28,7 @@ import (
 	infrav1 "voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1"
 	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud"
 	cloudfake "voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud/fake"
+	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/util"
 )
 
 var _ = Describe("StackitMachine Controller", func() {
@@ -129,6 +130,35 @@ var _ = Describe("StackitMachine Controller", func() {
 		expectCondition(got.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionTrue, "Available")
 		expectCondition(got.Status.Conditions, infrav1.MachineBootstrapReadyCondition, metav1.ConditionTrue, "Available")
 		expectCondition(got.Status.Conditions, infrav1.MachineInstanceReadyCondition, metav1.ConditionTrue, "Available")
+	})
+
+	It("attaches provider-managed node SSH access when bastion is enabled", func() {
+		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		stackitCluster := &infrav1.StackitCluster{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName, Namespace: namespace}, stackitCluster)).To(Succeed())
+		stackitCluster.Spec.Bastion = validBastionSpec()
+		Expect(k8sClient.Update(ctx, stackitCluster)).To(Succeed())
+		stackitCluster.Status.Ready = true
+		stackitCluster.Status.Bastion.SecurityGroupID = "bastion-sg"
+		Expect(k8sClient.Status().Update(ctx, stackitCluster)).To(Succeed())
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		Expect(got.Status.Ready).To(BeTrue())
+		Expect(fakeCloud.EnsureNodeSSHCalls).To(Equal(1))
+		securityGroups, err := fakeCloud.ListSecurityGroupsByTags(ctx, map[string]string{
+			util.LabelClusterName:  clusterName,
+			util.LabelResourceRole: util.ResourceRoleNodeSSH,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(securityGroups).To(HaveLen(1))
+		Expect(fakeCloud.SecurityGroupRemoteSources(securityGroups[0].ID)).To(ConsistOf("bastion-sg"))
+		Expect(fakeCloud.ServerHasSecurityGroup(got.Status.InstanceID, securityGroups[0].ID)).To(BeTrue())
 	})
 
 	It("does not create a VM when availabilityZone is outside published failure domains", func() {

@@ -147,6 +147,14 @@ var _ = Describe("StackitCluster Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		_, err = fakeCloud.EnsureNodeSSHAccess(ctx, cloud.NodeSSHAccessInput{
+			Name:                   got.Name + "-node-ssh",
+			ServerID:               got.Status.Bastion.ServerID,
+			BastionSecurityGroupID: got.Status.Bastion.SecurityGroupID,
+			Tags:                   nodeSSHAccessTags(got),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fakeCloud.SecurityGroupCount()).To(Equal(2))
 		got.Spec.Bastion.Enabled = false
 		Expect(k8sClient.Update(ctx, got)).To(Succeed())
 
@@ -172,6 +180,14 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		Expect(got.Status.Bastion.PublicIP).NotTo(BeEmpty())
+		_, err = fakeCloud.EnsureNodeSSHAccess(ctx, cloud.NodeSSHAccessInput{
+			Name:                   got.Name + "-node-ssh",
+			ServerID:               got.Status.Bastion.ServerID,
+			BastionSecurityGroupID: got.Status.Bastion.SecurityGroupID,
+			Tags:                   nodeSSHAccessTags(got),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fakeCloud.SecurityGroupCount()).To(Equal(2))
 		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
 
 		_, err = reconciler.Reconcile(ctx, request)

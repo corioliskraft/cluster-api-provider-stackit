@@ -359,6 +359,59 @@ func (c *SDKClient) DeleteBastion(ctx context.Context, input BastionInput, statu
 	return nil
 }
 
+func (c *SDKClient) EnsureNodeSSHAccess(ctx context.Context, input NodeSSHAccessInput) (*SecurityGroup, error) {
+	if input.Name == "" || input.ServerID == "" || input.BastionSecurityGroupID == "" {
+		return nil, fmt.Errorf("%w: node SSH access name, server ID, and bastion security group ID are required", ErrInvalidInput)
+	}
+	if len(input.Tags) == 0 {
+		return nil, fmt.Errorf("%w: node SSH access tags are required", ErrInvalidInput)
+	}
+
+	securityGroup, err := c.ensureNodeSSHSecurityGroup(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ensureNodeSSHSecurityGroupRule(ctx, securityGroup.ID, input.BastionSecurityGroupID); err != nil {
+		return nil, err
+	}
+	if err := c.addSecurityGroupToServer(ctx, input.ServerID, securityGroup.ID); err != nil {
+		return nil, err
+	}
+	return securityGroup, nil
+}
+
+func (c *SDKClient) DeleteNodeSSHAccess(ctx context.Context, tags map[string]string) error {
+	securityGroup, err := c.findSecurityGroupByTags(ctx, tags)
+	if IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	servers, err := c.ListServersByTags(ctx, clusterServerSelectorFromTags(tags))
+	if err != nil {
+		return err
+	}
+	for _, server := range servers {
+		if err := c.iaasClient.DefaultAPI.RemoveSecurityGroupFromServer(ctx, c.projectID, c.region, server.ID, securityGroup.ID).Execute(); err != nil {
+			err := classifySDKError("remove security group from server", err)
+			if !IsNotFound(err) && !IsConflict(err) {
+				return err
+			}
+		}
+	}
+	if err := c.deleteSecurityGroupRules(ctx, securityGroup.ID); err != nil {
+		return err
+	}
+	if err := c.iaasClient.DefaultAPI.DeleteSecurityGroup(ctx, c.projectID, c.region, securityGroup.ID).Execute(); err != nil {
+		err := classifySDKError("delete security group", err)
+		if !IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *SDKClient) ListPublicIPsByTags(ctx context.Context, tags map[string]string) ([]*PublicIP, error) {
 	if len(tags) == 0 {
 		return nil, fmt.Errorf("%w: empty tag selector", ErrInvalidInput)
@@ -590,6 +643,24 @@ func (c *SDKClient) ensureBastionSecurityGroup(ctx context.Context, input Bastio
 	return securityGroupFromSDK(securityGroup), nil
 }
 
+func (c *SDKClient) ensureNodeSSHSecurityGroup(ctx context.Context, input NodeSSHAccessInput) (*SecurityGroup, error) {
+	if existing, err := c.findSecurityGroupByTags(ctx, input.Tags); err == nil {
+		return existing, nil
+	} else if !IsNotFound(err) {
+		return nil, err
+	}
+	payload := iaas.NewCreateSecurityGroupPayload(input.Name)
+	payload.SetDescription("Cluster API Provider STACKIT node SSH access from bastion")
+	payload.SetLabels(tagsToSDKLabels(input.Tags))
+	securityGroup, err := c.iaasClient.DefaultAPI.CreateSecurityGroup(ctx, c.projectID, c.region).
+		CreateSecurityGroupPayload(*payload).
+		Execute()
+	if err != nil {
+		return nil, classifySDKError("create security group", err)
+	}
+	return securityGroupFromSDK(securityGroup), nil
+}
+
 func (c *SDKClient) ensureBastionSecurityGroupRules(ctx context.Context, securityGroupID string, cidrs []string) error {
 	if securityGroupID == "" {
 		return fmt.Errorf("%w: security group ID is required", ErrInvalidInput)
@@ -616,6 +687,30 @@ func (c *SDKClient) ensureBastionSecurityGroupRules(ctx context.Context, securit
 			Execute(); err != nil {
 			return classifySDKError("create security group rule", err)
 		}
+	}
+	return nil
+}
+
+func (c *SDKClient) ensureNodeSSHSecurityGroupRule(ctx context.Context, nodeSecurityGroupID, bastionSecurityGroupID string) error {
+	if nodeSecurityGroupID == "" || bastionSecurityGroupID == "" {
+		return fmt.Errorf("%w: node and bastion security group IDs are required", ErrInvalidInput)
+	}
+	resp, err := c.iaasClient.DefaultAPI.ListSecurityGroupRules(ctx, c.projectID, c.region, nodeSecurityGroupID).Execute()
+	if err != nil {
+		return classifySDKError("list security group rules", err)
+	}
+	if hasRemoteSecurityGroupSSHRule(resp.GetItems(), bastionSecurityGroupID) {
+		return nil
+	}
+	protocol := iaas.StringAsCreateProtocol(ptrTo(tcpProtocol))
+	rule := iaas.NewCreateSecurityGroupRulePayload("ingress")
+	rule.SetRemoteSecurityGroupId(bastionSecurityGroupID)
+	rule.SetPortRange(*iaas.NewPortRange(sshPort, sshPort))
+	rule.SetProtocol(protocol)
+	if _, err := c.iaasClient.DefaultAPI.CreateSecurityGroupRule(ctx, c.projectID, c.region, nodeSecurityGroupID).
+		CreateSecurityGroupRulePayload(*rule).
+		Execute(); err != nil {
+		return classifySDKError("create security group rule", err)
 	}
 	return nil
 }
@@ -710,6 +805,22 @@ func (c *SDKClient) deleteSecurityGroupRules(ctx context.Context, securityGroupI
 func hasSSHRule(rules []iaas.SecurityGroupRule, cidr string) bool {
 	for _, rule := range rules {
 		if rule.GetDirection() != "ingress" || rule.GetIpRange() != cidr {
+			continue
+		}
+		portRange := rule.GetPortRange()
+		if portRange.GetMin() != sshPort || portRange.GetMax() != sshPort {
+			continue
+		}
+		if protocol, ok := rule.GetProtocolOk(); ok && protocol.GetName() == tcpProtocol {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRemoteSecurityGroupSSHRule(rules []iaas.SecurityGroupRule, remoteSecurityGroupID string) bool {
+	for _, rule := range rules {
+		if rule.GetDirection() != "ingress" || rule.GetRemoteSecurityGroupId() != remoteSecurityGroupID {
 			continue
 		}
 		portRange := rule.GetPortRange()
@@ -847,6 +958,21 @@ func tagsToSDKLabels(tags map[string]string) map[string]interface{} {
 		out[k] = v
 	}
 	return out
+}
+
+func clusterServerSelectorFromTags(tags map[string]string) map[string]string {
+	selector := map[string]string{}
+	for _, key := range []string{
+		"cluster.x-k8s.io/cluster-name",
+		"cluster.x-k8s.io/cluster-namespace",
+		"cluster.x-k8s.io/managed-by",
+		"cluster-api-provider-stackit/managed",
+	} {
+		if value := tags[key]; value != "" {
+			selector[key] = value
+		}
+	}
+	return selector
 }
 
 func mapContains(haystack, needle map[string]string) bool {

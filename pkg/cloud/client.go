@@ -39,6 +39,10 @@ type Client interface {
 
 	DeleteBastion(ctx context.Context, input BastionInput, status Bastion) error
 
+	EnsureNodeSSHAccess(ctx context.Context, input NodeSSHAccessInput) (*SecurityGroup, error)
+
+	DeleteNodeSSHAccess(ctx context.Context, tags map[string]string) error
+
 	ListPublicIPsByTags(ctx context.Context, tags map[string]string) ([]*PublicIP, error)
 
 	ListSecurityGroupsByTags(ctx context.Context, tags map[string]string) ([]*SecurityGroup, error)

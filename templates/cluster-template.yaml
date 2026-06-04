@@ -37,6 +37,8 @@ spec:
     id: ${STACKIT_NETWORK_ID}
   apiServerLoadBalancer:
     enabled: true
+  bastion:
+    enabled: false
 ---
 apiVersion: controlplane.cluster.x-k8s.io/v1beta2
 kind: KubeadmControlPlane

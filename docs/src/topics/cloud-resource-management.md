@@ -197,9 +197,10 @@ Recommended behavior:
 - Provider-managed security groups must not open port 22 unless an explicit
   `ssh.enabled=true` and CIDR allowlist are configured.
 - For production debugging, document safer alternatives first: serial console,
-  logs, CAPI conditions/events, cloud-init output, and a bastion/VPN operated
-  outside the provider. If SSH is needed, users should create the key and pass
-  its name explicitly.
+  logs, CAPI conditions/events, and cloud-init output. If SSH is needed, users
+  should create the key and pass its name explicitly. The optional
+  `StackitCluster.spec.bastion` feature can create a provider-managed bastion,
+  but it still uses externally managed SSH keys.
 
 Implementation tasks:
 

@@ -21,6 +21,20 @@ The current provider implementation uses these STACKIT API operations:
 | Read VM state | `GetServer` | `iaas.server.get` |
 | Read VM NIC addresses for CAPI addresses and load balancer targets | `ListServerNICs` | `iaas.server.nic.list` |
 | Delete VM instances | `DeleteServer` | `iaas.server.delete` |
+| Create the optional bastion public IP | `CreatePublicIP` | `iaas.public-ip.create` |
+| Find existing tagged bastion public IPs | `ListPublicIPs` | `iaas.public-ip.list` |
+| Read the bastion public IP after attach | `GetPublicIP` | `iaas.public-ip.get` |
+| Attach the bastion public IP to the bastion server | `AddPublicIpToServer` | `iaas.server.public-ip.add` |
+| Detach the bastion public IP during cleanup | `RemovePublicIpFromServer` | `iaas.server.public-ip.remove` |
+| Delete the optional bastion public IP | `DeletePublicIP` | `iaas.public-ip.delete` |
+| Create the optional bastion security group | `CreateSecurityGroup` | `iaas.security-group.create` |
+| Find existing tagged bastion security groups | `ListSecurityGroups` | `iaas.security-group.list` |
+| Create bastion SSH ingress rules | `CreateSecurityGroupRule` | `iaas.security-group.rule.create` |
+| List bastion SSH ingress rules | `ListSecurityGroupRules` | `iaas.security-group.rule.list` |
+| Delete bastion SSH ingress rules during cleanup | `DeleteSecurityGroupRule` | `iaas.security-group.rule.delete` |
+| Attach the bastion security group to the bastion server | `AddSecurityGroupToServer` | `iaas.server.security-group.add` |
+| Detach the bastion security group during cleanup | `RemoveSecurityGroupFromServer` | `iaas.server.security-group.remove` |
+| Delete the optional bastion security group | `DeleteSecurityGroup` | `iaas.security-group.delete` |
 | Create the API server network load balancer | `CreateLoadBalancer` | `nlb.loadbalancer.create` |
 | Find existing tagged load balancers | `ListLoadBalancers` | `nlb.loadbalancer.list` |
 | Read the load balancer before target updates | `GetLoadBalancer` | `nlb.loadbalancer.get` |
@@ -31,11 +45,25 @@ The least-privilege role for the current provider is therefore:
 
 ```text
 iaas.network.get
+iaas.public-ip.create
+iaas.public-ip.delete
+iaas.public-ip.get
+iaas.public-ip.list
 iaas.server.create
 iaas.server.delete
 iaas.server.get
 iaas.server.list
 iaas.server.nic.list
+iaas.server.public-ip.add
+iaas.server.public-ip.remove
+iaas.server.security-group.add
+iaas.server.security-group.remove
+iaas.security-group.create
+iaas.security-group.delete
+iaas.security-group.list
+iaas.security-group.rule.create
+iaas.security-group.rule.delete
+iaas.security-group.rule.list
 nlb.loadbalancer.create
 nlb.loadbalancer.delete
 nlb.loadbalancer.get
@@ -43,12 +71,13 @@ nlb.loadbalancer.list
 nlb.targetpool.replace
 ```
 
-This list covers `StackitCluster` and `StackitMachine` reconciliation only. It
-does not include permissions for manually creating networks, security groups,
-SSH keys, images, or other prerequisite resources. It also does not include
-permissions for the in-cluster `cloud-provider-stackit` add-on if you configure
-that add-on to manage Kubernetes `Service` load balancers beyond the provider
-managed API server load balancer.
+This list covers `StackitCluster` and `StackitMachine` reconciliation,
+including the optional provider-managed bastion host. It does not include
+permissions for manually creating networks, SSH keys, images, or other
+prerequisite resources. It also does not include permissions for the in-cluster
+`cloud-provider-stackit` add-on if you configure that add-on to manage
+Kubernetes `Service` load balancers beyond the provider-managed API server load
+balancer.
 
 ## Create a strict role and service account with OpenTofu
 
@@ -76,7 +105,7 @@ Create a STACKIT role:
 {{#include ../../../hack/tf/iam-setup/capi-stackit-role.tf}}
 ```
 
-Create a STACKIT service sccount, assign the role and create a service account key:
+Create a STACKIT service account, assign the role and create a service account key:
 
 ```hcl
 {{#include ../../../hack/tf/iam-setup/capi-stackit-sa.tf}}
@@ -126,6 +155,20 @@ export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
 export STACKIT_CREDENTIALS_SECRET_NAMESPACE=default
 
 make test-e2e-workload-noderef
+```
+
+To verify the optional bastion path, first import the SSH key pair with the
+same service account stored in `stackit-credentials`; key pairs imported with a
+different service account are not visible to the provider. Then set
+`STACKIT_SSH_KEY_NAME` and `STACKIT_BASTION_SSH_KEY_NAME` and run:
+
+```sh
+export STACKIT_E2E_CREATE_CLUSTER=true
+export STACKIT_E2E_BASTION=true
+export STACKIT_SSH_KEY_NAME=<provider-service-account-keypair-name>
+export STACKIT_BASTION_SSH_KEY_NAME="${STACKIT_SSH_KEY_NAME}"
+
+make test-e2e-workload-bastion
 ```
 
 For release validation, also run the scale, worker-upgrade, control-plane

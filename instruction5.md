@@ -445,9 +445,9 @@ iaas.security-group.create
 iaas.security-group.delete
 iaas.security-group.get
 iaas.security-group.list
-iaas.security-group-rule.create
-iaas.security-group-rule.delete
-iaas.security-group-rule.list
+iaas.security-group.rule.create
+iaas.security-group.rule.delete
+iaas.security-group.rule.list
 iaas.server.security-group.add
 iaas.server.security-group.remove
 ```
@@ -543,6 +543,11 @@ The feature is complete when:
 - The least-privilege OpenTofu role and IAM docs include the verified new
   permissions.
 - Unit tests and relevant e2e tests pass.
+
+Use this admin service account for inspection:
+sa/serviceaccount.json
+
+Make sure the opentofu generated service account is used for e2e tests.
 
 ## Recommended PR Order
 

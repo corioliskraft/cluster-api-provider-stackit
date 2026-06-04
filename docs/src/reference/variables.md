@@ -21,6 +21,17 @@ Common clusterctl variables:
 | `KUBERNETES_APT_REPOSITORY_MINOR` | Kubernetes package repository minor used by topology development fallback `preKubeadmCommands`, for example `v1.35` |
 | `CLUSTER_CLASS_NAMESPACE` | Namespace containing the ClusterClass |
 
+Optional bastion variables may be used when patching a generated
+`StackitCluster` to enable SSH bastion access:
+
+| Variable | Description |
+| --- | --- |
+| `STACKIT_BASTION_ENABLED` | Set to `true` to enable the provider-managed SSH bastion |
+| `STACKIT_BASTION_IMAGE_ID` | STACKIT image UUID for the bastion VM |
+| `STACKIT_BASTION_MACHINE_TYPE` | STACKIT machine type for the bastion VM |
+| `STACKIT_BASTION_SSH_KEY_NAME` | Existing STACKIT SSH key name attached to the bastion VM |
+| `STACKIT_BASTION_ALLOWED_CIDRS` | CIDR allowlist for bastion TCP/22 access, for example `203.0.113.10/32` |
+
 Optional workload CNI helper variables:
 
 | Variable | Description |

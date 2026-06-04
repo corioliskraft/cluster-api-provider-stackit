@@ -1,117 +1,142 @@
 # Accessing cluster instances
 
-## Overview
+By default, workload clusters created by `cluster-api-provider-stackit` do not
+expose SSH access. Cluster API bootstrap does not require SSH; CABPK provides
+cloud-init user data through Kubernetes bootstrap Secrets.
 
-After running `clusterctl generate cluster` to generate the configuration for a new workload cluster (and then redirecting that output to a file for use with `kubectl apply`, or piping it directly to `kubectl apply`), the new workload cluster will be deployed. This document explains how to access the new workload cluster's nodes.
+For break-glass access, a `StackitCluster` can optionally ask the provider to
+create one managed SSH bastion VM. The bastion is attached to the same STACKIT
+network as the cluster nodes, gets a provider-managed public IP, and has a
+provider-managed security group allowing TCP/22 only from configured CIDRs.
 
 ## Prerequisites
 
-1. `clusterctl generate cluster` was successfully executed to generate the configuration for a new workload cluster
-2. The configuration for the new workload cluster was applied to the management cluster using `kubectl apply` and the cluster is up and running in an STACKIT environment.
-3. The SSH key referenced by `clusterctl` in step 1 exists in STACKIT and is stored in the correct location locally for use by SSH (on macOS/Linux systems, this is typically `$HOME/.ssh`). This document will refer to this key as `cluster-api-provider-stackit.sigs.k8s.io`.
+- The workload cluster was generated with `clusterctl generate cluster` and
+  applied to the management cluster.
+- The configured STACKIT service account role includes the bastion permissions
+  documented in [IAM Permissions Used](./iam-permissions.md).
+- The bastion image is an Ubuntu image with SSH enabled for the expected user,
+  normally `ubuntu`.
+- The STACKIT SSH key named in `spec.bastion.sshKeyName` already exists for the
+  service account used by the provider. STACKIT key pairs are not shared across
+  service accounts, so importing a key with an inspection or admin service
+  account does not make it usable by the controller service account.
+- To SSH from the bastion into cluster nodes, the control-plane and worker
+  `StackitMachineTemplate` resources must also set
+  `spec.template.spec.sshKeyName`. The bastion does not inject SSH keys into
+  existing node VMs.
 
-## Accessing nodes via SSH
+## Enable the bastion
 
-By default, workload clusters created in STACKIT will _not_ support access via SSH. However, the manifest for a workload cluster can be modified to include an SSH bastion host, created and managed by the management cluster, to enable SSH access to cluster nodes. The bastion node is created in a public subnet and provides SSH access from the world. It runs the official Ubuntu Linux image.
-
-### Enabling the bastion host
-
-To configure the Cluster API Provider for STACKIT to create an SSH bastion host, add this line to the STACKITCluster spec:
+Patch or edit the generated `StackitCluster`:
 
 ```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitCluster
+metadata:
+  name: <cluster-name>
+  namespace: <namespace>
 spec:
   bastion:
     enabled: true
-    ami: "3ad2867e-695b-4ee6-9502-b563013413d4"
+    imageID: <ubuntu-image-id>
+    machineType: <machine-type>
+    sshKeyName: <existing-stackit-ssh-key-name>
+    allowedCIDRs:
+      - <your-public-ip-or-network-cidr>
+    rootVolume:
+      sizeGiB: 50
+      performanceClass: storage_premium_perf6
+      deleteOnTermination: true
 ```
 
-The image idea must refer to a Ubuntu image.
+Use a narrow `allowedCIDRs` value such as `203.0.113.10/32` where possible.
+`0.0.0.0/0` allows SSH from anywhere and should only be used deliberately.
+Set `rootVolume` when the chosen machine type's flavor disk is too small for
+the chosen image.
 
-#### Obtain public IP address of the bastion node
+For node access, set the same or another existing SSH key on the machine
+templates:
 
-Once the workload cluster is up and running after being configured for an SSH bastion host, you can use the `kubectl get stackitcluster` command to look up the public IP address of the bastion host (make sure the `kubectl` context is set to the management cluster). The output will look something like this:
-
-```bash
-NAME   CLUSTER   READY   VPC                     BASTION IP
-test   test      true    vpc-1739285ed052be7ad   1.2.3.4
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: StackitMachineTemplate
+metadata:
+  name: <machine-template-name>
+spec:
+  template:
+    spec:
+      sshKeyName: <existing-stackit-ssh-key-name>
 ```
 
-#### Setting up the SSH key path
+Leaving `StackitMachineTemplate.spec.template.spec.sshKeyName` empty is valid,
+but SSH to nodes through the bastion will not work.
 
-Assumming that the `cluster-api-provider-stackit.sigs.k8s.io` SSH key is stored in
-`$HOME/.ssh/cluster-api-provider-stackit`, use this command to set up an environment variable for use in a later command:
+## Get the bastion IP
 
-```bash
-export CLUSTER_SSH_KEY=$HOME/.ssh/cluster-api-provider-stackit
+Use the management-cluster kubeconfig:
+
+```sh
+kubectl get stackitcluster <cluster-name> \
+  --namespace <namespace> \
+  -o jsonpath='{.status.bastion.publicIP}'
 ```
 
-#### Get private IP addresses of nodes in the cluster
+Or inspect the printcolumn:
 
-To get the private IP addresses of nodes in the cluster (nodes may be control plane nodes or worker nodes), use this `kubectl` command with the context set to the management cluster:
-
-```bash
-kubectl get nodes -o custom-columns=NAME:.metadata.name,\
-IP:"{.status.addresses[?(@.type=='InternalIP')].address}"
+```sh
+kubectl get stackitclusters --namespace <namespace>
 ```
 
-This will produce output that looks like this:
+The `Bastion IP` column is empty until STACKIT has assigned and attached the
+public IP.
 
-```bash
-NAME                                         IP
-ip-10-0-0-16.us-west-2.compute.internal   10.0.0.16
-ip-10-0-0-68.us-west-2.compute.internal   10.0.0.68
+## Get node internal IPs
+
+Use the workload-cluster kubeconfig:
+
+```sh
+kubectl get nodes \
+  -o custom-columns=NAME:.metadata.name,IP:'{.status.addresses[?(@.type=="InternalIP")].address}'
 ```
 
-The above command returns IP addresses of the nodes in the cluster. In this
-case, the values returned are `10.0.0.16` and `10.0.0.68`.
+Alternatively, inspect the management-cluster `StackitMachine` addresses:
 
-### Connecting to the nodes via SSH
-
-To access one of the nodes (either a control plane node or a worker node) via the SSH bastion host, use this command:
-
-```bash
-ssh -i ${CLUSTER_SSH_KEY} ubuntu@<NODE_IP> \
-	-o "ProxyCommand ssh -W %h:%p -i ${CLUSTER_SSH_KEY} ubuntu@${BASTION_HOST}"
+```sh
+kubectl get stackitmachines --namespace <namespace> \
+  -o custom-columns=NAME:.metadata.name,IP:'{.status.addresses[?(@.type=="InternalIP")].address}'
 ```
 
-And use this command if you are using a EKS based cluster:
+## Connect through the bastion
 
-```bash
-ssh -i ${CLUSTER_SSH_KEY} ec2-user@<NODE_IP> \
-	-o "ProxyCommand ssh -W %h:%p -i ${CLUSTER_SSH_KEY} ubuntu@${BASTION_HOST}"
+Set local variables:
+
+```sh
+export CLUSTER_SSH_KEY="$HOME/.ssh/<private-key-file>"
+export BASTION_HOST="$(kubectl get stackitcluster <cluster-name> \
+  --namespace <namespace> \
+  -o jsonpath='{.status.bastion.publicIP}')"
 ```
 
+Connect to a node internal IP through the bastion:
 
-If the whole document is followed, the value of `<NODE_IP>` will be either
-10.0.0.16 or 10.0.0.68.
+```sh
+ssh -i "${CLUSTER_SSH_KEY}" ubuntu@<node-internal-ip> \
+  -o "ProxyCommand ssh -W %h:%p -i ${CLUSTER_SSH_KEY} ubuntu@${BASTION_HOST}"
+```
 
-Alternately, users can add a configuration stanza to their SSH configuration file (typically found on macOS/Linux systems as `$HOME/.ssh/config`):
+An equivalent SSH config entry:
 
 ```text
-Host 10.0.*
+Host 10.*
   User ubuntu
-  IdentityFile <CLUSTER_SSH_KEY>
-  ProxyCommand ssh -W %h:%p ubuntu@<BASTION_HOST>
+  IdentityFile <cluster-ssh-key>
+  ProxyCommand ssh -W %h:%p ubuntu@<bastion-public-ip>
 ```
 
-## Additional Notes
+## Cleanup
 
-### Using the STACKIT CLI instead of `kubectl`
-
-It is also possible to use STACKIT CLI commands instead of `kubectl` to gather information about the cluster nodes.
-
-For example, to use the STACKIT CLI to get the public IP address of the SSH bastion host, use this STACKIT CLI command:
-
-```bash
-export BASTION_HOST=$(<insert command>)
-```
-
-You should substitute the correct cluster name for `<CLUSTER_NAME>` in the above command. (**NOTE**: If `make manifests` was used to generate manifests, by default the `<CLUSTER_NAME>` is set to `test1`.)
-
-Similarly, to obtain the list of private IP addresses of the cluster nodes, use this STACKIT CLI command:
-
-```bash
-<insert command>
-```
-
-Note that your STACKIT CLI must be configured with credentials that enable you to query the STACKIT API.
+The provider deletes the managed bastion server, public IP, security group, and
+security group rules when the `StackitCluster` is deleted. It also deletes
+previously recorded managed bastion resources when `spec.bastion.enabled` is
+changed from `true` to `false`.

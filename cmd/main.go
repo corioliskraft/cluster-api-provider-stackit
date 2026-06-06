@@ -38,6 +38,7 @@ import (
 
 	infrastructurev1alpha1 "voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1"
 	"voigt.tngl.sh/cluster-api-provider-stackit/internal/controller"
+	webhookv1alpha1 "voigt.tngl.sh/cluster-api-provider-stackit/internal/webhook/v1alpha1"
 	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud"
 	// +kubebuilder:scaffold:imports
 )
@@ -196,6 +197,24 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "stackitmachine")
 		os.Exit(1)
+	}
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err := webhookv1alpha1.SetupStackitClusterWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to create webhook", "webhook", "StackitCluster")
+			os.Exit(1)
+		}
+		if err := webhookv1alpha1.SetupStackitMachineWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to create webhook", "webhook", "StackitMachine")
+			os.Exit(1)
+		}
+		if err := webhookv1alpha1.SetupStackitClusterTemplateWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to create webhook", "webhook", "StackitClusterTemplate")
+			os.Exit(1)
+		}
+		if err := webhookv1alpha1.SetupStackitMachineTemplateWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to create webhook", "webhook", "StackitMachineTemplate")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 

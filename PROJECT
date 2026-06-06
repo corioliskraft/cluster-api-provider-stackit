@@ -18,6 +18,10 @@ resources:
   kind: StackitCluster
   path: voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1
   version: v1alpha1
+  webhooks:
+    defaulting: true
+    validation: true
+    webhookVersion: v1
 - api:
     crdVersion: v1
     namespaced: true
@@ -27,6 +31,10 @@ resources:
   kind: StackitMachine
   path: voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1
   version: v1alpha1
+  webhooks:
+    defaulting: true
+    validation: true
+    webhookVersion: v1
 - api:
     crdVersion: v1
     namespaced: true
@@ -35,6 +43,10 @@ resources:
   kind: StackitClusterTemplate
   path: voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1
   version: v1alpha1
+  webhooks:
+    defaulting: true
+    validation: true
+    webhookVersion: v1
 - api:
     crdVersion: v1
     namespaced: true
@@ -43,4 +55,8 @@ resources:
   kind: StackitMachineTemplate
   path: voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1
   version: v1alpha1
+  webhooks:
+    defaulting: true
+    validation: true
+    webhookVersion: v1
 version: "3"

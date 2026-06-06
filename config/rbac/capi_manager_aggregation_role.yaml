@@ -1,0 +1,28 @@
+# This role is not used by the cluster-api-provider-stackit manager itself.
+# It is aggregated into the Cluster API core manager role so CAPI controllers
+# can manage STACKIT infrastructure resources for owner references, labels, and
+# ClusterClass-generated objects.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-api-provider-stackit
+    app.kubernetes.io/managed-by: kustomize
+    cluster.x-k8s.io/aggregate-to-manager: "true"
+  name: capi-manager-aggregation-role
+rules:
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - stackitclusters
+  - stackitclustertemplates
+  - stackitmachines
+  - stackitmachinetemplates
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

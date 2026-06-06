@@ -7,6 +7,7 @@ resources:
 - service_account.yaml
 - role.yaml
 - role_binding.yaml
+- capi_manager_aggregation_role.yaml
 - leader_election_role.yaml
 - leader_election_role_binding.yaml
 # The following RBAC configurations are used to protect
@@ -34,4 +35,3 @@ resources:
 - stackitcluster_admin_role.yaml
 - stackitcluster_editor_role.yaml
 - stackitcluster_viewer_role.yaml
-

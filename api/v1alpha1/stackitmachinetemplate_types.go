@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 // StackitMachineTemplateSpec defines the desired state of StackitMachineTemplate.
@@ -30,6 +31,11 @@ type StackitMachineTemplateSpec struct {
 // StackitMachineTemplateResource holds the spec for a StackitMachine created
 // from a template.
 type StackitMachineTemplateResource struct {
+	// metadata is the standard object's metadata.
+	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
+	// +optional
+	ObjectMeta clusterv1.ObjectMeta `json:"metadata,omitempty,omitzero"`
+
 	// spec is the StackitMachineSpec that will be used to create the
 	// StackitMachine.
 	// +required

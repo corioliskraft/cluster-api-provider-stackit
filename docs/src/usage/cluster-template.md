@@ -36,8 +36,8 @@ The template also installs `cloud-provider-stackit` into the workload cluster
 through Cluster API `ClusterResourceSet`. The management cluster must have the
 ClusterResourceSet feature enabled before applying the generated cluster. For
 local validation, `hack/clusterctl-local.yaml` sets `CLUSTER_RESOURCE_SET=true`.
-This applies to the default non-topology template; the topology ClusterClass
-template does not currently include the cloud-provider addon wiring.
+The topology ClusterClass template follows the same pattern and also includes
+the cloud-provider addon wiring.
 
 Set `STACKIT_SERVICE_ACCOUNT_JSON_B64` to a single-line base64 encoding of the
 STACKIT service account JSON. Set `STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE` to a

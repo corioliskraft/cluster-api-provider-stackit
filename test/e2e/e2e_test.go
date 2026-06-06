@@ -629,6 +629,11 @@ var _ = Describe("Manager", Ordered, func() {
 				ObservedInstanceIDs: &observedInstanceIDs,
 			}, &workloadKubeconfig)
 
+			By("verifying topology template metadata is propagated to generated infrastructure resources")
+			Eventually(func(g Gomega) {
+				expectTopologyTemplateMetadata(g, cfg.Namespace, clusterName, testID)
+			}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
 			By("deleting the topology workload Cluster")
 			cmd = exec.Command("kubectl", "delete", "cluster", clusterName, "-n", cfg.Namespace, "--wait=true", "--timeout=45m")
 			_, err = utils.Run(cmd)
@@ -2372,7 +2377,9 @@ type stackitClusterList struct {
 
 type stackitClusterItem struct {
 	Metadata struct {
-		Name string `json:"name"`
+		Name        string            `json:"name"`
+		Labels      map[string]string `json:"labels"`
+		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Status struct {
 		Ready bool `json:"ready"`
@@ -2381,8 +2388,9 @@ type stackitClusterItem struct {
 
 type stackitMachineItem struct {
 	Metadata struct {
-		Name   string            `json:"name"`
-		Labels map[string]string `json:"labels"`
+		Name        string            `json:"name"`
+		Labels      map[string]string `json:"labels"`
+		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Spec struct {
 		AdditionalLabels map[string]string `json:"additionalLabels"`
@@ -2401,13 +2409,18 @@ func expectNamedStackitClusterReady(g Gomega, namespace, clusterName string) {
 }
 
 func expectTopologyStackitClusterReady(g Gomega, namespace, clusterName string) {
+	cluster := topologyStackitCluster(g, namespace, clusterName)
+	g.Expect(cluster.Status.Ready).To(BeTrue(), "StackitCluster %s is not ready", cluster.Metadata.Name)
+}
+
+func topologyStackitCluster(g Gomega, namespace, clusterName string) stackitClusterItem {
 	cmd := exec.Command("kubectl", "get", "stackitclusters", "-n", namespace, "-l", "cluster.x-k8s.io/cluster-name="+clusterName, "-o", "json")
 	output, err := utils.Run(cmd)
 	g.Expect(err).NotTo(HaveOccurred())
 	var list stackitClusterList
 	g.Expect(json.Unmarshal([]byte(output), &list)).To(Succeed())
 	g.Expect(list.Items).To(HaveLen(1))
-	g.Expect(list.Items[0].Status.Ready).To(BeTrue(), "StackitCluster %s is not ready", list.Items[0].Metadata.Name)
+	return list.Items[0]
 }
 
 func stackitMachinesForTestID(g Gomega, namespace, testID string) []stackitMachineItem {
@@ -2796,6 +2809,41 @@ func expectProviderIDNodeRefAlignment(g Gomega, namespace, clusterName, testID, 
 		g.Expect(ok).To(BeTrue(), "Node %s referenced by Machine %s not found", machine.Status.NodeRef.Name, machine.Metadata.Name)
 		g.Expect(node.Spec.ProviderID).To(Equal(stackitMachine.Status.ProviderID), "Node %s providerID does not match Machine %s", node.Metadata.Name, machine.Metadata.Name)
 	}
+}
+
+func expectTopologyTemplateMetadata(g Gomega, namespace, clusterName, testID string) {
+	const templateMetadataKey = "cluster-api-provider-stackit/template-metadata"
+
+	cluster := topologyStackitCluster(g, namespace, clusterName)
+	expectMetadataValue(g, "StackitCluster "+cluster.Metadata.Name, cluster.Metadata.Labels, cluster.Metadata.Annotations, templateMetadataKey, "cluster")
+
+	machines := stackitMachinesForTestID(g, namespace, testID)
+	var controlPlaneMachines, workerMachines []stackitMachineItem
+	for _, machine := range machines {
+		if machine.Metadata.Labels["cluster.x-k8s.io/cluster-name"] != clusterName {
+			continue
+		}
+		if _, ok := machine.Metadata.Labels["cluster.x-k8s.io/control-plane"]; ok {
+			controlPlaneMachines = append(controlPlaneMachines, machine)
+			continue
+		}
+		workerMachines = append(workerMachines, machine)
+	}
+
+	g.Expect(controlPlaneMachines).To(HaveLen(1), "expected one topology control-plane StackitMachine for cluster %q", clusterName)
+	for _, machine := range controlPlaneMachines {
+		expectMetadataValue(g, "StackitMachine "+machine.Metadata.Name, machine.Metadata.Labels, machine.Metadata.Annotations, templateMetadataKey, "control-plane")
+	}
+
+	g.Expect(workerMachines).NotTo(BeEmpty(), "expected topology worker StackitMachines for cluster %q", clusterName)
+	for _, machine := range workerMachines {
+		expectMetadataValue(g, "StackitMachine "+machine.Metadata.Name, machine.Metadata.Labels, machine.Metadata.Annotations, templateMetadataKey, "worker")
+	}
+}
+
+func expectMetadataValue(g Gomega, objectName string, labels, annotations map[string]string, key, want string) {
+	g.Expect(labels).To(HaveKeyWithValue(key, want), "%s has unexpected propagated template label %q", objectName, key)
+	g.Expect(annotations).To(HaveKeyWithValue(key, want), "%s has unexpected propagated template annotation %q", objectName, key)
 }
 
 func expectWorkloadNodesReadyForMachines(g Gomega, kubeconfig string, machines []capiMachineItem) {

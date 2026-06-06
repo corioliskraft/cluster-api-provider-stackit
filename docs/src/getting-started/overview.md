@@ -75,20 +75,15 @@ API contract details.
 
 For full Cluster API support, the provider should complete the following areas:
 
-- Add CAPI core RBAC aggregation. The CRDs already carry the
-  `cluster.x-k8s.io/v1beta2: v1alpha1` contract label, but the provider should
-  also ship `cluster.x-k8s.io/aggregate-to-manager: "true"` RBAC for
-  `StackitCluster`, `StackitMachine`, and their templates so CAPI core
-  controllers can manage owner references, labels, and ClusterClass-generated
-  infrastructure resources correctly.
 - Respect `Machine.spec.failureDomain`. The provider currently uses
   `StackitMachine.spec.availabilityZone`. For full CAPI behavior, if CAPI sets
   `Machine.spec.failureDomain`, the infrastructure machine must be placed in
   that failure domain. The provider should also consider surfacing the actual
   placement through `StackitMachine.status.failureDomain`.
 - Continue hardening ClusterClass support. Topology create/ready/delete e2e now
-  covers a 1 control-plane / 1 worker workload cluster, but highly available
-  topology variants and template metadata behavior still need focused coverage.
+  covers a 1 control-plane / 1 worker workload cluster, including template
+  metadata propagation to generated STACKIT infrastructure objects. Highly
+  available topology variants still need focused coverage.
 - Keep the `cloud-provider-stackit` integration aligned with Kubernetes minor
   versions. Supported workload cluster minors are currently v1.33.x through
   v1.36.x, and the cloud-provider image minor must match the workload cluster

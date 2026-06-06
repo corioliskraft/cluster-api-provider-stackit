@@ -268,6 +268,11 @@ metadata:
   name: stackit-cluster
 spec:
   template:
+    metadata:
+      labels:
+        cluster-api-provider-stackit/template-metadata: cluster
+      annotations:
+        cluster-api-provider-stackit/template-metadata: cluster
     spec:
       projectID: 00000000-0000-0000-0000-000000000000
       region: eu01
@@ -317,6 +322,11 @@ metadata:
   name: stackit-control-plane
 spec:
   template:
+    metadata:
+      labels:
+        cluster-api-provider-stackit/template-metadata: control-plane
+      annotations:
+        cluster-api-provider-stackit/template-metadata: control-plane
     spec:
       additionalLabels: {}
       imageID: 00000000-0000-0000-0000-000000000000
@@ -334,6 +344,11 @@ metadata:
   name: stackit-default-worker
 spec:
   template:
+    metadata:
+      labels:
+        cluster-api-provider-stackit/template-metadata: worker
+      annotations:
+        cluster-api-provider-stackit/template-metadata: worker
     spec:
       additionalLabels: {}
       imageID: 00000000-0000-0000-0000-000000000000

@@ -1,58 +1,187 @@
 # ClusterClass
 
-ClusterClass support is provided by:
+ClusterClass is Cluster API's reusable cluster blueprint mechanism. Instead of
+rendering every infrastructure, control plane, bootstrap, and worker resource
+directly for each workload cluster, you define a `ClusterClass` once and create
+workload clusters that reference it through `Cluster.spec.topology`.
+
+For this provider, ClusterClass support is provided by:
 
 - `templates/clusterclass.yaml`
 - `templates/cluster-template-topology.yaml`
 
-The ClusterClass wires topology variables into STACKIT templates:
+`templates/clusterclass.yaml` contains the reusable class and the STACKIT
+infrastructure templates. `templates/cluster-template-topology.yaml` contains a
+small topology `Cluster` that selects the class and passes values as topology
+variables.
+
+## Why use ClusterClass
+
+Use ClusterClass when you want CAPI to own the generated cluster topology. CAPI
+creates and reconciles the underlying `StackitCluster`, `KubeadmControlPlane`,
+`MachineDeployment`, bootstrap templates, and `StackitMachine` infrastructure
+objects from the class.
+
+This gives you:
+
+- one reusable cluster shape for multiple workload clusters
+- smaller workload cluster manifests
+- Kubernetes version, replica count, and infrastructure settings expressed as
+  topology variables
+- standard CAPI topology behavior for scaling and upgrades
+- generated infrastructure resources with owner references, labels, and
+  annotations managed by CAPI core
+
+You do not need ClusterClass for a simple explicit cluster manifest. The classic
+template in [Classic Cluster Template](cluster-template.md) is still valid.
+ClusterClass is the preferred path when you want repeatable topology management
+and fleet-style cluster creation.
+
+## What the STACKIT ClusterClass configures
+
+The current ClusterClass wires topology variables into STACKIT templates for:
 
 - Kubernetes version
-- Control-plane replica count
-- Worker replica count
-- Machine type
-- Image ID
-- Region
-- Network ID
-- Credentials Secret name
-- Additional STACKIT cloud labels
-- Development fallback `preKubeadmCommands`
+- control-plane replica count
+- worker replica count
+- machine type
+- image ID
+- region
+- network ID
+- credentials Secret name
+- additional STACKIT cloud labels
+- development fallback `preKubeadmCommands`
 
-Apply the ClusterClass:
+The ClusterClass uses these provider templates:
 
-```sh
-kubectl apply -f templates/clusterclass.yaml
-```
+- `StackitClusterTemplate` for the generated `StackitCluster`
+- one `StackitMachineTemplate` for control-plane machines
+- one `StackitMachineTemplate` for worker machines
 
-Render and apply a topology Cluster:
+The templates also include `spec.template.metadata.labels` and
+`spec.template.metadata.annotations`. CAPI topology copies this metadata onto
+the generated `StackitCluster` and `StackitMachine` objects. This is useful for
+policy, ownership, automation, and observability labels that should be present
+on generated infrastructure objects.
 
-```sh
-export KUBERNETES_VERSION=v1.35.3
-export KUBERNETES_APT_REPOSITORY_MINOR=v1.35
-export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < serviceaccount.json | tr -d '\n')"
-export STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.35.3
-
-clusterctl generate cluster "${CLUSTER_NAME}" \
-  --from templates/cluster-template-topology.yaml \
-  --kubernetes-version "${KUBERNETES_VERSION}" \
-  --control-plane-machine-count 1 \
-  --worker-machine-count 1 \
-  > "${CLUSTER_NAME}-topology.yaml"
-
-kubectl apply -f "${CLUSTER_NAME}-topology.yaml"
-```
+## Prerequisites
 
 The management cluster must run CAPI core and kubeadm-control-plane with
 `ClusterTopology=true`. Otherwise the admission webhooks reject `ClusterClass`,
 `KubeadmControlPlaneTemplate`, and `Cluster.spec.topology`.
 
-The topology cluster template includes a `cloud-provider-stackit`
+For local clusterctl usage, `hack/clusterctl-local.yaml` sets
+`CLUSTER_TOPOLOGY: "true"`.
+
+The topology cluster template also includes a `cloud-provider-stackit`
 `ClusterResourceSet` addon and a workload-cluster Secret for the cloud
-controller manager. It also passes the same development fallback
-`preKubeadmCommands` used by the real e2e workload fixture so generic Ubuntu
-images can install `containerd`, `kubelet`, `kubeadm`, and `kubectl` before
-kubeadm runs. For production, prefer kubeadm-ready images and manage addons
-through your normal Helm, GitOps, or addon-provider workflow.
+controller manager. The management cluster must have the ClusterResourceSet
+feature enabled as well. For local validation, `hack/clusterctl-local.yaml` sets
+`CLUSTER_RESOURCE_SET: "true"`.
+
+Before rendering, prepare the same STACKIT variables used by the classic
+template:
+
+```sh
+export CLUSTER_NAME=stackit-workload
+export NAMESPACE=default
+export KUBERNETES_VERSION=v1.35.3
+export KUBERNETES_APT_REPOSITORY_MINOR=v1.35
+export CONTROL_PLANE_MACHINE_COUNT=1
+export WORKER_MACHINE_COUNT=1
+
+export STACKIT_PROJECT_ID=<project-uuid>
+export STACKIT_REGION=eu01
+export STACKIT_NETWORK_ID=<network-uuid>
+export STACKIT_IMAGE_ID=<image-uuid>
+export STACKIT_MACHINE_TYPE=c2i.2
+export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
+
+export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < serviceaccount.json | tr -d '\n')"
+export STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.35.3
+```
+
+`STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE` must use a minor version matching
+`KUBERNETES_VERSION`.
+
+## Apply the ClusterClass
+
+Apply the reusable class and its templates into the namespace that should own
+the class:
+
+```sh
+kubectl apply -n "${NAMESPACE}" -f templates/clusterclass.yaml
+```
+
+If the class lives in a different namespace than the workload cluster, set:
+
+```sh
+export CLUSTER_CLASS_NAMESPACE=<clusterclass-namespace>
+```
+
+## Create a topology cluster
+
+Render and apply a topology `Cluster`:
+
+```sh
+clusterctl generate cluster "${CLUSTER_NAME}" \
+  --from templates/cluster-template-topology.yaml \
+  --target-namespace "${NAMESPACE}" \
+  --kubernetes-version "${KUBERNETES_VERSION}" \
+  --control-plane-machine-count "${CONTROL_PLANE_MACHINE_COUNT}" \
+  --worker-machine-count "${WORKER_MACHINE_COUNT}" \
+  > "${CLUSTER_NAME}-topology.yaml"
+
+kubectl apply -f "${CLUSTER_NAME}-topology.yaml"
+```
+
+CAPI topology then creates the generated infrastructure and control plane
+objects. Inspect them with:
+
+```sh
+kubectl get cluster,machine,stackitcluster,stackitmachine -n "${NAMESPACE}"
+```
+
+Check propagated template metadata:
+
+```sh
+kubectl get stackitcluster -n "${NAMESPACE}" \
+  -l "cluster.x-k8s.io/cluster-name=${CLUSTER_NAME}" \
+  -o go-template='{{range .items}}{{index .metadata.labels "cluster-api-provider-stackit/template-metadata"}}{{"\n"}}{{end}}'
+
+kubectl get stackitmachine -n "${NAMESPACE}" \
+  -l "cluster.x-k8s.io/cluster-name=${CLUSTER_NAME}" \
+  -o go-template='{{range .items}}{{.metadata.name}} {{index .metadata.labels "cluster-api-provider-stackit/template-metadata"}}{{"\n"}}{{end}}'
+```
+
+## Workload cluster addons
+
+The topology cluster template installs the cloud controller manager through a
+`ClusterResourceSet`. It does not install a CNI.
+
+After the workload API is reachable, install a CNI that matches the configured
+pod/service CIDRs and network policy expectations before expecting Nodes to
+become Ready. For a reproducible development path, use the helper documented in
+[Workload CNI](cni.md).
+
+## Delete a topology cluster
+
+Delete the topology `Cluster`; CAPI deletes the generated objects and this
+provider deletes the STACKIT resources:
+
+```sh
+kubectl delete cluster "${CLUSTER_NAME}" -n "${NAMESPACE}"
+```
+
+After deletion, verify generated resources are gone:
+
+```sh
+kubectl get machine,stackitcluster,stackitmachine \
+  -n "${NAMESPACE}" \
+  -l "cluster.x-k8s.io/cluster-name=${CLUSTER_NAME}"
+```
+
+## E2E validation
 
 Run the topology workload e2e path independently only when billable STACKIT
 validation is intended:
@@ -70,3 +199,8 @@ Equivalent make target:
 ```sh
 make test-e2e-workload-topology
 ```
+
+The topology e2e creates a real STACKIT workload cluster, waits for Ready
+Machines and Nodes, verifies providerID alignment, verifies template metadata
+propagation, deletes the Cluster, and checks that tagged STACKIT servers and API
+server load balancers are cleaned up.

@@ -9,6 +9,10 @@ Nodes will not become fully Ready until a CNI is installed. For local validation
 and simple development clusters, this repository provides a repeatable helper
 for Cilium or Calico.
 
+For the complete tested workload addon flow, including the embedded
+`cloud-provider-stackit` `ClusterResourceSet` and verification commands, see
+[Workload Addons](addons.md).
+
 First, retrieve the workload-cluster kubeconfig:
 
 ```sh
@@ -42,6 +46,10 @@ make install-workload-cni \
   WORKLOAD_KUBECONFIG="${CLUSTER_NAME}.kubeconfig" \
   CNI_MANIFEST=./my-cni.yaml
 ```
+
+Custom manifests are applied as-is. The helper cannot infer which resources
+prove that an arbitrary CNI is healthy, so custom CNI users must wait for their
+own rollout resources.
 
 For production clusters, prefer managing the CNI with Helm, GitOps, or a
 Cluster API addon provider. `ClusterResourceSet` is useful for simple static

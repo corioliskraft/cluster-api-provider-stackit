@@ -2594,6 +2594,9 @@ type workloadNodeItem struct {
 	} `json:"metadata"`
 	Spec struct {
 		ProviderID string `json:"providerID"`
+		Taints     []struct {
+			Key string `json:"key"`
+		} `json:"taints"`
 	} `json:"spec"`
 	Status struct {
 		Conditions []struct {
@@ -2772,6 +2775,8 @@ func renderCloudProviderStackitAddon(clusterName string, cfg stackitVMConfig, ku
 	return replacer.Replace(string(addonBytes))
 }
 
+const externalCloudProviderTaint = "node.cloudprovider.kubernetes.io/uninitialized"
+
 func expectWorkloadNodesReady(g Gomega, kubeconfig string, want int) {
 	nodes := workloadNodes(g, kubeconfig)
 	g.Expect(nodes).To(HaveLen(want))
@@ -2779,6 +2784,7 @@ func expectWorkloadNodesReady(g Gomega, kubeconfig string, want int) {
 		g.Expect(node.Spec.ProviderID).NotTo(BeEmpty(), "Node %s has no providerID", node.Metadata.Name)
 		g.Expect(node.Spec.ProviderID).To(HavePrefix("stackit://"), "Node %s has unexpected providerID", node.Metadata.Name)
 		g.Expect(nodeReady(node)).To(BeTrue(), "Node %s is not Ready", node.Metadata.Name)
+		g.Expect(nodeHasTaint(node, externalCloudProviderTaint)).To(BeFalse(), "Node %s still has the external cloud-provider taint", node.Metadata.Name)
 	}
 }
 
@@ -2859,6 +2865,7 @@ func expectWorkloadNodesReadyForMachines(g Gomega, kubeconfig string, machines [
 		g.Expect(ok).To(BeTrue(), "Node %s referenced by Machine %s not found", machine.Status.NodeRef.Name, machine.Metadata.Name)
 		g.Expect(node.Spec.ProviderID).To(Equal(*machine.Spec.ProviderID), "Node %s providerID does not match Machine %s", node.Metadata.Name, machine.Metadata.Name)
 		g.Expect(nodeReady(node)).To(BeTrue(), "Node %s is not Ready", node.Metadata.Name)
+		g.Expect(nodeHasTaint(node, externalCloudProviderTaint)).To(BeFalse(), "Node %s still has the external cloud-provider taint", node.Metadata.Name)
 	}
 }
 
@@ -2919,6 +2926,15 @@ func nodeReady(node workloadNodeItem) bool {
 	for _, condition := range node.Status.Conditions {
 		if condition.Type == "Ready" {
 			return condition.Status == "True"
+		}
+	}
+	return false
+}
+
+func nodeHasTaint(node workloadNodeItem, key string) bool {
+	for _, taint := range node.Spec.Taints {
+		if taint.Key == key {
+			return true
 		}
 	}
 	return false

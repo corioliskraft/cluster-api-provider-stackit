@@ -12,6 +12,7 @@ Generated files:
 - `metadata.yaml`
 - `clusterclass.yaml`
 - `cluster-template.yaml`
+- `cluster-template-bastion.yaml`
 - `cluster-template-development.yaml`
 - `cluster-template-topology.yaml`
 - `addons/*.yaml`
@@ -118,6 +119,7 @@ Required generated assets:
 - `metadata.yaml`
 - `infrastructure-components.yaml`
 - `cluster-template.yaml`
+- `cluster-template-bastion.yaml`
 - `cluster-template-development.yaml`
 - `cluster-template-topology.yaml`
 - `clusterclass.yaml`

@@ -545,7 +545,7 @@ The feature is complete when:
 - Unit tests and relevant e2e tests pass.
 
 Use this admin service account for inspection:
-sa/serviceaccount.json
+.stackit/serviceaccount.json
 
 Make sure the opentofu generated service account is used for e2e tests.
 

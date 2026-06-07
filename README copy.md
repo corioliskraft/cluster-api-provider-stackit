@@ -37,9 +37,11 @@ Create a Kubernetes Secret in the namespace where the workload cluster will be c
 Example:
 
 ```sh
+export STACKIT_SERVICE_ACCOUNT_JSON_FILE=./.stackit/serviceaccount.json
+
 kubectl create secret generic stackit-credentials \
   --from-literal=project-id='4cf9e1f0-1f18-4c5b-bcc5-fbd3dd6675a5' \
-  --from-file=serviceaccount.json=./sa/serviceaccount.json
+  --from-file=serviceaccount.json="${STACKIT_SERVICE_ACCOUNT_JSON_FILE}"
 ```
 
 If `spec.credentialsSecretRef.namespace` is omitted on `StackitCluster`, the controller reads the Secret from the `StackitCluster` namespace.
@@ -89,7 +91,8 @@ export STACKIT_IMAGE_ID=3ad2867e-695b-4ee6-9502-b563013413d4 # non-ARM Ubuntu 22
 export STACKIT_MACHINE_TYPE=c2i.2
 export STACKIT_SSH_KEY_NAME= # optional; leave empty when SSH access is not required
 export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
-export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < ./sa/serviceaccount.json | tr -d '\n')"
+export STACKIT_SERVICE_ACCOUNT_JSON_FILE=./.stackit/serviceaccount.json
+export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < "${STACKIT_SERVICE_ACCOUNT_JSON_FILE}" | tr -d '\n')"
 export STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.34.8
 
 hack/validate-stackit-versions.sh

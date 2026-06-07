@@ -1,5 +1,6 @@
 .envrc
 .env
+.stackit
 
 # Binaries for programs and plugins
 *.exe
@@ -34,7 +35,6 @@ go.work
 
 # Kubeconfig might contain secrets
 *.kubeconfig
-sa/
 
 # OpenTofu/Terraform local state and secrets
 **/.terraform/

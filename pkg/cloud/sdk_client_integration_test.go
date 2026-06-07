@@ -159,15 +159,7 @@ func integrationCredentials(t *testing.T) Credentials {
 func defaultIntegrationServiceAccountPath(t *testing.T) string {
 	t.Helper()
 
-	for _, path := range []string{
-		"./sa/serviceaccount.json",
-		"../../sa/serviceaccount.json",
-	} {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-	t.Fatalf("Could not find sa/serviceaccount.json; set %s explicitly", envIntegrationServiceAccountFile)
+	t.Fatalf("Set %s to the STACKIT service account JSON file", envIntegrationServiceAccountFile)
 	return ""
 }
 

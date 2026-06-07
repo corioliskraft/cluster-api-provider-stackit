@@ -69,7 +69,10 @@ func serviceAccountJSON() ([]byte, error) {
 	if value := os.Getenv(envServiceAccountJSON); value != "" {
 		return []byte(value), nil
 	}
-	path := envDefault(envServiceAccountFile, "./sa/serviceaccount.json")
+	path := os.Getenv(envServiceAccountFile)
+	if path == "" {
+		return nil, fmt.Errorf("set %s or %s", envServiceAccountFile, envServiceAccountJSON)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s or set %s: %w", envServiceAccountFile, envServiceAccountJSON, err)

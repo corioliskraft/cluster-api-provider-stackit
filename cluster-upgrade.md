@@ -11,9 +11,11 @@ provider installed.
 The workload cluster also needs a credentials Secret in the target namespace:
 
 ```sh
+export STACKIT_SERVICE_ACCOUNT_JSON_FILE=./.stackit/serviceaccount.json
+
 kubectl create secret generic stackit-credentials \
   --namespace default \
-  --from-file=serviceaccount.json=./sa/serviceaccount.json
+  --from-file=serviceaccount.json="${STACKIT_SERVICE_ACCOUNT_JSON_FILE}"
 ```
 
 Export the template variables used by `templates/cluster-template.yaml`:
@@ -243,4 +245,3 @@ Verify no provider resources remain:
 kubectl get stackitcluster,stackitmachine -n "$NAMESPACE" \
   -l "cluster.x-k8s.io/cluster-name=${CLUSTER_NAME}"
 ```
-

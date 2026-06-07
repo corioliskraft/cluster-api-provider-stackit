@@ -42,7 +42,7 @@ Before creating the cluster, ensure the management cluster has
 Set the cloud provider inputs before rendering the template:
 
 ```sh
-export STACKIT_SERVICE_ACCOUNT_JSON_FILE=./sa/cluster-api-provider-stackit-serviceaccount.json
+export STACKIT_SERVICE_ACCOUNT_JSON_FILE=./.stackit/cluster-api-provider-stackit-serviceaccount.json
 export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < "${STACKIT_SERVICE_ACCOUNT_JSON_FILE}" | tr -d '\n')"
 export STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE="ghcr.io/stackitcloud/cloud-provider-stackit:<version>"
 ```

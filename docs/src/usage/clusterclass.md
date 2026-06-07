@@ -97,7 +97,8 @@ export STACKIT_IMAGE_ID=<image-uuid>
 export STACKIT_MACHINE_TYPE=c2i.2
 export STACKIT_CREDENTIALS_SECRET_NAME=stackit-credentials
 
-export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < serviceaccount.json | tr -d '\n')"
+export STACKIT_SERVICE_ACCOUNT_JSON_FILE=./.stackit/cluster-api-provider-stackit-serviceaccount.json
+export STACKIT_SERVICE_ACCOUNT_JSON_B64="$(base64 < "${STACKIT_SERVICE_ACCOUNT_JSON_FILE}" | tr -d '\n')"
 export STACKIT_CLOUD_CONTROLLER_MANAGER_IMAGE=ghcr.io/stackitcloud/cloud-provider-stackit/cloud-controller-manager:v1.35.3
 ```
 

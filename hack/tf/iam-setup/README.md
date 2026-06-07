@@ -50,8 +50,10 @@ tofu apply
 Write the generated provider key to a local file:
 
 ```sh
-mkdir -p ../../../sa
-tofu output -raw service_account_key_json > ../../../sa/cluster-api-provider-stackit-serviceaccount.json
+export STACKIT_SERVICE_ACCOUNT_JSON_FILE=../../../.stackit/cluster-api-provider-stackit-serviceaccount.json
+
+mkdir -p "$(dirname "${STACKIT_SERVICE_ACCOUNT_JSON_FILE}")"
+tofu output -raw service_account_key_json > "${STACKIT_SERVICE_ACCOUNT_JSON_FILE}"
 ```
 
 Create the Kubernetes Secret in the namespace that contains your
@@ -61,7 +63,7 @@ Create the Kubernetes Secret in the namespace that contains your
 kubectl create secret generic stackit-credentials \
   --namespace default \
   --from-literal=project-id="$(tofu output -raw project_id 2>/dev/null || grep '^project_id' terraform.tfvars | cut -d= -f2 | tr -d ' \"')" \
-  --from-file=serviceaccount.json=../../../sa/cluster-api-provider-stackit-serviceaccount.json
+  --from-file=serviceaccount.json="${STACKIT_SERVICE_ACCOUNT_JSON_FILE}"
 ```
 
 The generated key is also stored in OpenTofu state as a sensitive value. Protect

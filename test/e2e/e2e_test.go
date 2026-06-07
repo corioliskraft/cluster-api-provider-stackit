@@ -33,9 +33,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud"
-	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/util"
-	"voigt.tngl.sh/cluster-api-provider-stackit/test/utils"
+	"github.com/voigt/cluster-api-provider-stackit/pkg/cloud"
+	"github.com/voigt/cluster-api-provider-stackit/pkg/util"
+	"github.com/voigt/cluster-api-provider-stackit/test/utils"
 )
 
 // namespace where the project is deployed in

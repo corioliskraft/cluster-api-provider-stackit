@@ -36,7 +36,7 @@ The final release path is still open: installer YAML, Helm chart, or both.
 # Release And Distribution Implementation Plan
 
 This plan turns the current local-only release packaging into a production-ready
-release flow for Cluster API Provider STACKIT. The repo already has
+release flow for Cluster API Provider STACKIT (CAPSTK). The repo already has
 `make clusterctl-release`, `make build-installer`, `metadata.yaml`, clusterctl
 templates under `templates/`, and release docs that explicitly call this work
 unfinished.
@@ -259,7 +259,7 @@ Fill `docs/src/topics/reference/versions.md`.
 
 Matrix columns:
 
-- CAPSTI version.
+- CAPSTK version.
 - Cluster API version.
 - Cluster API contract.
 - Management Kubernetes versions.
@@ -272,7 +272,7 @@ Matrix columns:
 
 Seed current values:
 
-- CAPSTI `v0.1.x`
+- CAPSTK `v0.1.x`
 - Cluster API `v1.13.x`
 - Contract `v1beta2`
 - Kubernetes libraries `v0.35.x`

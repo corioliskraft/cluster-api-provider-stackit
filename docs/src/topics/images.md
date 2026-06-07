@@ -1,6 +1,6 @@
 # OS Images
 
-- at this point in time CAPS has been tested only with Ubuntu 24.04
+- at this point in time CAPSTK has been tested only with Ubuntu 24.04
 - required utilities such as `kubectl`, `containerd`, etc. are installed at runtime via cloud-init
 - this will be more flexible in the future
 

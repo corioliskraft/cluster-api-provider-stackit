@@ -1,13 +1,12 @@
-# Tutorial: cluster-api-provider-stackit
-
-Minimal path: run Cluster API in kind, deploy this provider, then create one
-STACKIT workload cluster. Workload VMs are real STACKIT resources.
+# Quick Start
 
 ## Prerequisites
 
 Install `go`, `docker`, `kubectl`, `kind`, `clusterctl`, and the `stackit` CLI.
 You also need a STACKIT project, service-account JSON key, existing network,
 image, and machine type.
+
+Furthermore, make sure that the provided service-account has [an appropriate set of permissions](./topics/iam-permissions.md).
 
 ```sh
 export STACKIT_PROJECT_ID=<project-uuid>

@@ -1,4 +1,4 @@
-module voigt.tngl.sh/cluster-api-provider-stackit
+module github.com/voigt/cluster-api-provider-stackit
 
 go 1.25.7
 

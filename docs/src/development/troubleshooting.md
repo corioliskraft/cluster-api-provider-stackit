@@ -28,6 +28,8 @@ kubectl get secret -n "${NAMESPACE}"
 `StackitMachine` intentionally does not contain user data directly. Bootstrap
 data comes from the CAPI bootstrap Secret.
 
+STACKIT CLI might also be valueable to check server logs during boot: `stackit server log <server-id>`
+
 ## Cloud resources remain after a failed e2e run
 
 Run direct cleanup by e2e tags:

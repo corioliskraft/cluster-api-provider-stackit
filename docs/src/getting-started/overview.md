@@ -1,6 +1,7 @@
 # Overview
 
-The provider creates STACKIT infrastructure for Cluster API workload clusters.
+Cluster API Provider STACKIT (CAPSTK) creates STACKIT infrastructure for
+Cluster API workload clusters.
 The management cluster usually runs locally with kind, while workload-cluster
 machines run as STACKIT Compute Engine servers.
 
@@ -11,7 +12,7 @@ Provider stack:
 | Core | `cluster-api` |
 | Bootstrap | kubeadm / CABPK |
 | Control plane | kubeadm / KCP |
-| Infrastructure | `cluster-api-provider-stackit` |
+| Infrastructure | `cluster-api-provider-stackit` / CAPSTK |
 
 The provider does not implement its own bootstrap or control-plane logic. It
 receives bootstrap data from Cluster API bootstrap Secrets and passes it to

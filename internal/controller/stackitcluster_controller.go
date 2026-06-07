@@ -38,10 +38,10 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	infrav1 "voigt.tngl.sh/cluster-api-provider-stackit/api/v1alpha1"
-	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/cloud"
-	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/scope"
-	"voigt.tngl.sh/cluster-api-provider-stackit/pkg/util"
+	infrav1 "github.com/voigt/cluster-api-provider-stackit/api/v1alpha1"
+	"github.com/voigt/cluster-api-provider-stackit/pkg/cloud"
+	"github.com/voigt/cluster-api-provider-stackit/pkg/scope"
+	"github.com/voigt/cluster-api-provider-stackit/pkg/util"
 )
 
 const (

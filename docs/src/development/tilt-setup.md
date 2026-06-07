@@ -1,4 +1,4 @@
-# Developing Cluster API Provider STACKIT with Tilt
+# Developing Cluster API Provider STACKIT (CAPSTK) with Tilt
 
 This guide describes a local development loop with [kind][kind], [Tilt][tilt],
 upstream [Cluster API Tilt][cluster-api-tilt], and this provider. Tilt runs from

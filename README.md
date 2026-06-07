@@ -5,6 +5,7 @@
 </p>
 
 <p align="center">
+    <a href="https://pkg.go.dev/github.com/voigt/cluster-api-provider-stackit"><img src="https://pkg.go.dev/badge/github.com/voigt/cluster-api-provider-stackit.svg" alt="Go Reference"></a>
 </p>
 
 ------

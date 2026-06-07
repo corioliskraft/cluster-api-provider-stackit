@@ -222,6 +222,9 @@ ssh -i "${CLUSTER_SSH_KEY}" ubuntu@<node-internal-ip> \
   -o "ProxyCommand ssh -W %h:%p -i ${CLUSTER_SSH_KEY} ubuntu@${BASTION_HOST}"
 ```
 
+Use the node image's SSH user for the final hop. For example, Ubuntu nodes
+usually use `ubuntu`, while Flatcar nodes use `core`.
+
 An equivalent SSH config entry:
 
 ```text

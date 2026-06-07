@@ -29,7 +29,7 @@ Cluster API Provider STACKIT is abbreviated as CAPSTK.
 
 ## Documentation
 
-Please see our [book](./docs) for in-depth documentation.
+Please see our [book](https://capstk.voigt.fyi/) for in-depth documentation.
 
 Use `make serve-book` to serve the book locally from this repository.
 
@@ -47,7 +47,7 @@ Check out the [Quick Start](./quick-start.md) for launching a cluster on STACKIT
 - [x] [Optional Bastion hosts](./topics/accessing-vm-instances.md) for easier access of control plane or worker nodes
 - [x] Tested Kubernetes Lifecycle (Scaling, Kubernetes Upgrades), see [E2E-Tests](./development/testing.md)
 - [x] [ClusterClass Topology](https://cluster-api.sigs.k8s.io/tasks/experimental-features/cluster-class/)
-- [ ] Choice of Linux distribution using various Images (currently only [Ubuntu 24.04 is supported](./topics/images.md)).
+- [x] Support varioius Linux Distributions (tested with [Ubuntu and Flatcar](./topics/images.md))
 - [ ] Release distribution via OCI Images and Helm Charts
 - [ ] Manage the bootstrapping of networks, security groups and vm instances.
   - [ ] Deploys Kubernetes control planes into private subnets with a separate bastion server.

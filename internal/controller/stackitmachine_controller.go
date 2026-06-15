@@ -150,7 +150,7 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 		if reason == util.BootstrapReasonInvalid {
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: retryableErrorRequeueAfter}, nil
 	}
 
 	cloudClient, err := r.buildCloudClient(ctx, s.StackitCluster)
@@ -176,7 +176,7 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
 			metav1.ConditionFalse, "InstanceError", err.Error(), sm.Generation)
 		if cloud.IsRetryable(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: retryableErrorRequeueAfter}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -203,7 +203,7 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
 			metav1.ConditionFalse, "BastionSSHAccessError", err.Error(), sm.Generation)
 		if cloud.IsRetryable(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: retryableErrorRequeueAfter}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -212,7 +212,7 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineReadyCondition,
 			metav1.ConditionFalse, "LoadBalancerTargetError", err.Error(), sm.Generation)
 		if cloud.IsRetryable(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: retryableErrorRequeueAfter}, nil
 		}
 		return ctrl.Result{}, err
 	}

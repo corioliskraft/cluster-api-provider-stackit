@@ -49,6 +49,8 @@ const (
 	defaultAPIServerPort int32 = 6443
 
 	bootstrapTargetName = "capi-bootstrap-placeholder"
+
+	retryableErrorRequeueAfter = 5 * time.Second
 )
 
 // StackitClusterReconciler reconciles a StackitCluster object.
@@ -144,7 +146,7 @@ func (r *StackitClusterReconciler) reconcileNormal(ctx context.Context, s *scope
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
 			metav1.ConditionFalse, "NetworkNotFound", err.Error(), sc.Generation)
 		if cloud.IsRetryable(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: retryableErrorRequeueAfter}, nil
 		}
 		return ctrl.Result{}, nil
 	}
@@ -172,7 +174,7 @@ func (r *StackitClusterReconciler) reconcileNormal(ctx context.Context, s *scope
 			util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
 				metav1.ConditionFalse, "LoadBalancerError", err.Error(), sc.Generation)
 			if cloud.IsRetryable(err) {
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: retryableErrorRequeueAfter}, nil
 			}
 			return ctrl.Result{}, nil
 		}
@@ -211,7 +213,7 @@ func (r *StackitClusterReconciler) reconcileNormal(ctx context.Context, s *scope
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
 			metav1.ConditionFalse, "BastionError", err.Error(), sc.Generation)
 		if cloud.IsRetryable(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: retryableErrorRequeueAfter}, nil
 		}
 		return ctrl.Result{}, nil
 	} else if !ready {
@@ -334,7 +336,7 @@ func (r *StackitClusterReconciler) reconcileBastion(
 			metav1.ConditionFalse, "Recreating", "recreating bastion because cloudInitRef content changed", sc.Generation)
 		util.SetCondition(&sc.Status.Conditions, infrav1.ClusterReadyCondition,
 			metav1.ConditionFalse, "Recreating", "recreating bastion because cloudInitRef content changed", sc.Generation)
-		return ctrl.Result{Requeue: true}, false, nil
+		return ctrl.Result{RequeueAfter: retryableErrorRequeueAfter}, false, nil
 	}
 
 	bastion, err := cloudClient.EnsureBastion(ctx, input)

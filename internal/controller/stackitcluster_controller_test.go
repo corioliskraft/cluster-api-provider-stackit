@@ -80,7 +80,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		Expect(got.Status.Ready).To(BeTrue())
@@ -107,7 +107,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		Expect(got.Status.Ready).To(BeTrue())
@@ -124,7 +124,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		Expect(got.Status.Ready).To(BeTrue())
@@ -160,7 +160,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		Expect(got.Status.Bastion).To(Equal(infrav1.StackitBastionStatus{}))
@@ -226,7 +226,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		Expect(got.Status.Bastion.ServerID).NotTo(BeEmpty())
@@ -250,7 +250,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		Expect(got.Status.Bastion.ServerID).NotTo(BeEmpty())
@@ -271,7 +271,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		Expect(got.Status.Ready).To(BeFalse())
@@ -294,7 +294,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		oldServerID := got.Status.Bastion.ServerID
@@ -315,14 +315,14 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err = reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeTrue())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 		Expect(fakeCloud.ServerCount()).To(Equal(0))
 		Expect(fakeCloud.PublicIPCount()).To(Equal(0))
 		Expect(fakeCloud.SecurityGroupCount()).To(Equal(0))
 
 		result, err = reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		Expect(got.Status.Bastion.ServerID).NotTo(BeEmpty())
@@ -339,7 +339,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		Expect(got.Status.Ready).To(BeFalse())
@@ -352,7 +352,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeTrue())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 
 		got := &infrav1.StackitCluster{}
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
@@ -367,7 +367,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		got := &infrav1.StackitCluster{}
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
@@ -389,7 +389,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 		Expect(cloudClientFactoryCalls).To(Equal(0))
 		Expect(fakeCloud.LoadBalancerCount()).To(Equal(0))
 
@@ -412,7 +412,7 @@ var _ = Describe("StackitCluster Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 		Expect(cloudClientFactoryCalls).To(Equal(0))
 		Expect(fakeCloud.LoadBalancerCount()).To(Equal(0))
 

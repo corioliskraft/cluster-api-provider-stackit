@@ -87,7 +87,7 @@ var _ = Describe("StackitMachine Controller", func() {
 	It("does not create a VM when Machine.spec.bootstrap.dataSecretName is empty", func() {
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeTrue())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 		Expect(fakeCloud.ServerCount()).To(Equal(0))
 
 		got := &infrav1.StackitMachine{}
@@ -101,7 +101,7 @@ var _ = Describe("StackitMachine Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeTrue())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 		Expect(fakeCloud.ServerCount()).To(Equal(0))
 
 		got := &infrav1.StackitMachine{}
@@ -115,7 +115,7 @@ var _ = Describe("StackitMachine Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 		Expect(fakeCloud.ServerCount()).To(Equal(1))
 
 		got := &infrav1.StackitMachine{}
@@ -145,7 +145,7 @@ var _ = Describe("StackitMachine Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		got := &infrav1.StackitMachine{}
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
@@ -171,7 +171,7 @@ var _ = Describe("StackitMachine Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 		Expect(fakeCloud.ServerCount()).To(Equal(0))
 
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
@@ -189,7 +189,7 @@ var _ = Describe("StackitMachine Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 		Expect(fakeCloud.ServerCount()).To(Equal(0))
 
 		got := &infrav1.StackitMachine{}
@@ -214,7 +214,7 @@ var _ = Describe("StackitMachine Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 		Expect(cloudClientFactoryCalls).To(Equal(0))
 		Expect(fakeCloud.ServerCount()).To(Equal(0))
 
@@ -239,7 +239,7 @@ var _ = Describe("StackitMachine Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 		Expect(cloudClientFactoryCalls).To(Equal(0))
 		Expect(fakeCloud.ServerCount()).To(Equal(0))
 
@@ -254,7 +254,7 @@ var _ = Describe("StackitMachine Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeTrue())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 		Expect(fakeCloud.ServerCount()).To(Equal(0))
 
 		got := &infrav1.StackitMachine{}
@@ -270,7 +270,7 @@ var _ = Describe("StackitMachine Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeTrue())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 		Expect(fakeCloud.ServerCount()).To(Equal(0))
 
 		got := &infrav1.StackitMachine{}
@@ -287,7 +287,7 @@ var _ = Describe("StackitMachine Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeFalse())
+		Expect(result).To(Equal(reconcile.Result{}))
 		Expect(fakeCloud.ServerCount()).To(Equal(1))
 		Expect(fakeCloud.LoadBalancerCount()).To(Equal(1))
 
@@ -308,7 +308,7 @@ var _ = Describe("StackitMachine Controller", func() {
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.Requeue).To(BeTrue())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 
 		got := &infrav1.StackitMachine{}
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())

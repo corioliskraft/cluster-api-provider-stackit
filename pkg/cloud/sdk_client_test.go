@@ -27,6 +27,7 @@ const (
 	testSDKNetworkID     = "11111111-1111-4111-8111-111111111111"
 	testSDKImageID       = "22222222-2222-4222-8222-222222222222"
 	testSDKSecurityGroup = "44444444-4444-4444-8444-444444444444"
+	testBoolTrue         = "true"
 )
 
 func TestSDKClientCreateServerUsesExpectedPayload(t *testing.T) {
@@ -37,7 +38,7 @@ func TestSDKClientCreateServerUsesExpectedPayload(t *testing.T) {
 			if got := r.URL.Query().Get("label_selector"); got != "cluster=test" {
 				t.Fatalf("label_selector = %q, want cluster=test", got)
 			}
-			if got := r.URL.Query().Get("details"); got != "true" {
+			if got := r.URL.Query().Get("details"); got != testBoolTrue {
 				t.Fatalf("details = %q, want true", got)
 			}
 			writeJSON(t, w, map[string]any{"items": []any{}})
@@ -312,7 +313,7 @@ func newSDKTestServer(t *testing.T, handler http.Handler) *httptest.Server {
 func newTestSDKClient(t *testing.T, endpoint string) *SDKClient {
 	t.Helper()
 
-	t.Setenv(stackitNoAuthEnv, "true")
+	t.Setenv(stackitNoAuthEnv, testBoolTrue)
 	t.Setenv(stackitIAASEndpointEnv, endpoint)
 	t.Setenv(stackitLBEndpointEnv, endpoint)
 

@@ -34,6 +34,8 @@ const (
 	validImageID         = "33333333-3333-3333-3333-333333333333"
 	validSecurityGroupID = "44444444-4444-4444-4444-444444444444"
 	validServerID        = "55555555-5555-5555-5555-555555555555"
+	updatedMachineType   = "c2i.4"
+	testNamespace        = "default"
 )
 
 var _ = Describe("STACKIT admission webhooks", func() {
@@ -188,7 +190,7 @@ var _ = Describe("STACKIT admission webhooks", func() {
 		It("rejects immutable machine creation field updates", func() {
 			oldMachine := validStackitMachine("immutable-machine")
 			newMachine := oldMachine.DeepCopy()
-			newMachine.Spec.MachineType = "c2i.4"
+			newMachine.Spec.MachineType = updatedMachineType
 
 			_, err := validator.ValidateUpdate(ctx, oldMachine, newMachine)
 			expectInvalidField(err, "spec")
@@ -278,7 +280,7 @@ var _ = Describe("STACKIT admission webhooks", func() {
 		It("rejects template spec updates", func() {
 			oldTemplate := validStackitMachineTemplate("immutable-machine-template")
 			newTemplate := oldTemplate.DeepCopy()
-			newTemplate.Spec.Template.Spec.MachineType = "c2i.4"
+			newTemplate.Spec.Template.Spec.MachineType = updatedMachineType
 
 			_, err := validator.ValidateUpdate(ctx, oldTemplate, newTemplate)
 			expectInvalidField(err, "spec.template.spec")
@@ -289,7 +291,7 @@ var _ = Describe("STACKIT admission webhooks", func() {
 	Describe("live admission", func() {
 		It("defaults machine template root volume through the API server", func() {
 			template := validStackitMachineTemplate("live-default-machine-template")
-			template.Namespace = "default"
+			template.Namespace = testNamespace
 
 			Expect(k8sClient.Create(ctx, template)).To(Succeed())
 
@@ -301,7 +303,7 @@ var _ = Describe("STACKIT admission webhooks", func() {
 
 		It("rejects providerID in machine templates through the API server", func() {
 			template := validStackitMachineTemplate("live-providerid-machine-template")
-			template.Namespace = "default"
+			template.Namespace = testNamespace
 			providerID := "stackit://" + validServerID
 			template.Spec.Template.Spec.ProviderID = &providerID
 
@@ -311,10 +313,10 @@ var _ = Describe("STACKIT admission webhooks", func() {
 
 		It("rejects machine template spec updates through the API server", func() {
 			template := validStackitMachineTemplate("live-immutable-machine-template")
-			template.Namespace = "default"
+			template.Namespace = testNamespace
 			Expect(k8sClient.Create(ctx, template)).To(Succeed())
 
-			template.Spec.Template.Spec.MachineType = "c2i.4"
+			template.Spec.Template.Spec.MachineType = updatedMachineType
 			err := k8sClient.Update(ctx, template)
 			expectInvalidField(err, "spec.template.spec")
 		})

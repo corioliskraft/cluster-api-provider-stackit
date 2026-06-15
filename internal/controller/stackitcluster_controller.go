@@ -50,6 +50,8 @@ const (
 
 	bootstrapTargetName = "capi-bootstrap-placeholder"
 
+	cloudInitRefKindSecret = "Secret"
+
 	retryableErrorRequeueAfter = 5 * time.Second
 )
 
@@ -499,7 +501,7 @@ func (r *StackitClusterReconciler) resolveBastionCloudInit(ctx context.Context, 
 			return nil, fmt.Errorf("bastion.cloudInitRef key %q not found in ConfigMap %s", ref.Key, key)
 		}
 		return []byte(value), nil
-	case "Secret":
+	case cloudInitRefKindSecret:
 		secret := &corev1.Secret{}
 		if err := r.Get(ctx, key, secret); err != nil {
 			if apierrors.IsNotFound(err) {

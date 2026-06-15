@@ -222,8 +222,12 @@ func (c *SDKClient) GetNetwork(ctx context.Context, id string) (*Network, error)
 }
 
 func (c *SDKClient) EnsureBastion(ctx context.Context, input BastionInput) (*Bastion, error) {
-	if input.Name == "" || input.NetworkID == "" || input.ImageID == "" || input.MachineType == "" || input.SSHKeyName == "" {
-		return nil, fmt.Errorf("%w: bastion name, network ID, image ID, machine type, and SSH key name are required", ErrInvalidInput)
+	if input.Name == "" || input.NetworkID == "" || input.ImageID == "" ||
+		input.MachineType == "" || input.SSHKeyName == "" {
+		return nil, fmt.Errorf(
+			"%w: bastion name, network ID, image ID, machine type, and SSH key name are required",
+			ErrInvalidInput,
+		)
 	}
 	if len(input.AllowedCIDRs) == 0 {
 		return nil, fmt.Errorf("%w: bastion allowed CIDRs are required", ErrInvalidInput)
@@ -265,7 +269,9 @@ func (c *SDKClient) EnsureBastion(ctx context.Context, input BastionInput) (*Bas
 		return nil, err
 	}
 	if publicIP.NetworkInterfaceID == "" {
-		if err := c.iaasClient.DefaultAPI.AddPublicIpToServer(ctx, c.projectID, c.region, server.ID, publicIP.ID).Execute(); err != nil {
+		if err := c.iaasClient.DefaultAPI.
+			AddPublicIpToServer(ctx, c.projectID, c.region, server.ID, publicIP.ID).
+			Execute(); err != nil {
 			err := classifySDKError("add public IP to server", err)
 			if !IsConflict(err) {
 				return nil, err
@@ -318,7 +324,9 @@ func (c *SDKClient) DeleteBastion(ctx context.Context, input BastionInput, statu
 	}
 
 	if serverID != "" && publicIPID != "" {
-		if err := c.iaasClient.DefaultAPI.RemovePublicIpFromServer(ctx, c.projectID, c.region, serverID, publicIPID).Execute(); err != nil {
+		if err := c.iaasClient.DefaultAPI.
+			RemovePublicIpFromServer(ctx, c.projectID, c.region, serverID, publicIPID).
+			Execute(); err != nil {
 			err := classifySDKError("remove public IP from server", err)
 			if !IsNotFound(err) && !IsConflict(err) {
 				return err
@@ -326,7 +334,9 @@ func (c *SDKClient) DeleteBastion(ctx context.Context, input BastionInput, statu
 		}
 	}
 	if serverID != "" && securityGroupID != "" {
-		if err := c.iaasClient.DefaultAPI.RemoveSecurityGroupFromServer(ctx, c.projectID, c.region, serverID, securityGroupID).Execute(); err != nil {
+		if err := c.iaasClient.DefaultAPI.
+			RemoveSecurityGroupFromServer(ctx, c.projectID, c.region, serverID, securityGroupID).
+			Execute(); err != nil {
 			err := classifySDKError("remove security group from server", err)
 			if !IsNotFound(err) && !IsConflict(err) {
 				return err
@@ -350,7 +360,9 @@ func (c *SDKClient) DeleteBastion(ctx context.Context, input BastionInput, statu
 		if err := c.deleteSecurityGroupRules(ctx, securityGroupID); err != nil {
 			return err
 		}
-		if err := c.iaasClient.DefaultAPI.DeleteSecurityGroup(ctx, c.projectID, c.region, securityGroupID).Execute(); err != nil {
+		if err := c.iaasClient.DefaultAPI.
+			DeleteSecurityGroup(ctx, c.projectID, c.region, securityGroupID).
+			Execute(); err != nil {
 			err := classifySDKError("delete security group", err)
 			if !IsNotFound(err) {
 				return err
@@ -362,7 +374,10 @@ func (c *SDKClient) DeleteBastion(ctx context.Context, input BastionInput, statu
 
 func (c *SDKClient) EnsureNodeSSHAccess(ctx context.Context, input NodeSSHAccessInput) (*SecurityGroup, error) {
 	if input.Name == "" || input.ServerID == "" || input.BastionSecurityGroupID == "" {
-		return nil, fmt.Errorf("%w: node SSH access name, server ID, and bastion security group ID are required", ErrInvalidInput)
+		return nil, fmt.Errorf(
+			"%w: node SSH access name, server ID, and bastion security group ID are required",
+			ErrInvalidInput,
+		)
 	}
 	if len(input.Tags) == 0 {
 		return nil, fmt.Errorf("%w: node SSH access tags are required", ErrInvalidInput)
@@ -394,7 +409,9 @@ func (c *SDKClient) DeleteNodeSSHAccess(ctx context.Context, tags map[string]str
 		return err
 	}
 	for _, server := range servers {
-		if err := c.iaasClient.DefaultAPI.RemoveSecurityGroupFromServer(ctx, c.projectID, c.region, server.ID, securityGroup.ID).Execute(); err != nil {
+		if err := c.iaasClient.DefaultAPI.
+			RemoveSecurityGroupFromServer(ctx, c.projectID, c.region, server.ID, securityGroup.ID).
+			Execute(); err != nil {
 			err := classifySDKError("remove security group from server", err)
 			if !IsNotFound(err) && !IsConflict(err) {
 				return err
@@ -404,7 +421,9 @@ func (c *SDKClient) DeleteNodeSSHAccess(ctx context.Context, tags map[string]str
 	if err := c.deleteSecurityGroupRules(ctx, securityGroup.ID); err != nil {
 		return err
 	}
-	if err := c.iaasClient.DefaultAPI.DeleteSecurityGroup(ctx, c.projectID, c.region, securityGroup.ID).Execute(); err != nil {
+	if err := c.iaasClient.DefaultAPI.
+		DeleteSecurityGroup(ctx, c.projectID, c.region, securityGroup.ID).
+		Execute(); err != nil {
 		err := classifySDKError("delete security group", err)
 		if !IsNotFound(err) {
 			return err
@@ -517,7 +536,10 @@ func (c *SDKClient) DeleteAPIServerLoadBalancer(ctx context.Context, id string) 
 	return nil
 }
 
-func (c *SDKClient) ListAPIServerLoadBalancersByTags(ctx context.Context, tags map[string]string) ([]*LoadBalancer, error) {
+func (c *SDKClient) ListAPIServerLoadBalancersByTags(
+	ctx context.Context,
+	tags map[string]string,
+) ([]*LoadBalancer, error) {
 	if len(tags) == 0 {
 		return nil, fmt.Errorf("%w: empty tag selector", ErrInvalidInput)
 	}
@@ -550,7 +572,12 @@ func (c *SDKClient) EnsureAPIServerLoadBalancerTarget(ctx context.Context, input
 	}
 	targetPool := apiServerTargetPool(loadBalancer)
 	if targetPool == nil {
-		return fmt.Errorf("%w: load balancer %q has no %q target pool", ErrNotFound, input.LoadBalancerID, apiserverTargetPoolName)
+		return fmt.Errorf(
+			"%w: load balancer %q has no %q target pool",
+			ErrNotFound,
+			input.LoadBalancerID,
+			apiserverTargetPoolName,
+		)
 	}
 
 	targets := withoutBootstrapTarget(targetPool.GetTargets())
@@ -692,7 +719,10 @@ func (c *SDKClient) ensureBastionSecurityGroupRules(ctx context.Context, securit
 	return nil
 }
 
-func (c *SDKClient) ensureNodeSSHSecurityGroupRule(ctx context.Context, nodeSecurityGroupID, bastionSecurityGroupID string) error {
+func (c *SDKClient) ensureNodeSSHSecurityGroupRule(
+	ctx context.Context,
+	nodeSecurityGroupID, bastionSecurityGroupID string,
+) error {
 	if nodeSecurityGroupID == "" || bastionSecurityGroupID == "" {
 		return fmt.Errorf("%w: node and bastion security group IDs are required", ErrInvalidInput)
 	}
@@ -770,7 +800,9 @@ func (c *SDKClient) findSecurityGroupByTags(ctx context.Context, tags map[string
 }
 
 func (c *SDKClient) addSecurityGroupToServer(ctx context.Context, serverID, securityGroupID string) error {
-	if err := c.iaasClient.DefaultAPI.AddSecurityGroupToServer(ctx, c.projectID, c.region, serverID, securityGroupID).Execute(); err != nil {
+	if err := c.iaasClient.DefaultAPI.
+		AddSecurityGroupToServer(ctx, c.projectID, c.region, serverID, securityGroupID).
+		Execute(); err != nil {
 		err := classifySDKError("add security group to server", err)
 		if !IsConflict(err) {
 			return err
@@ -793,7 +825,9 @@ func (c *SDKClient) deleteSecurityGroupRules(ctx context.Context, securityGroupI
 		if ruleID == "" {
 			continue
 		}
-		if err := c.iaasClient.DefaultAPI.DeleteSecurityGroupRule(ctx, c.projectID, c.region, securityGroupID, ruleID).Execute(); err != nil {
+		if err := c.iaasClient.DefaultAPI.
+			DeleteSecurityGroupRule(ctx, c.projectID, c.region, securityGroupID, ruleID).
+			Execute(); err != nil {
 			err := classifySDKError("delete security group rule", err)
 			if !IsNotFound(err) {
 				return err
@@ -850,7 +884,8 @@ func (c *SDKClient) updateAPIServerTargetPool(
 		payload.SetTargetPort(current.GetTargetPort())
 	}
 	payload.SetTargets(targets)
-	if _, err := c.lbClient.DefaultAPI.UpdateTargetPool(ctx, c.projectID, c.region, loadBalancerID, apiserverTargetPoolName).
+	if _, err := c.lbClient.DefaultAPI.
+		UpdateTargetPool(ctx, c.projectID, c.region, loadBalancerID, apiserverTargetPoolName).
 		UpdateTargetPoolPayload(*payload).
 		Execute(); err != nil {
 		return classifySDKError("update load balancer target pool", err)

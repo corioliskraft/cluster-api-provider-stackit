@@ -199,7 +199,12 @@ func TestSDKClientEnsureAPIServerLoadBalancerUsesBootstrapTargetWhenInitialTarge
 		t.Fatalf("EnsureAPIServerLoadBalancer() = %#v", loadBalancer)
 	}
 
-	assertNestedStringField(t, createPayload, []string{"targetPools", "0", "targets", "0", "displayName"}, bootstrapTargetName)
+	assertNestedStringField(
+		t,
+		createPayload,
+		[]string{"targetPools", "0", "targets", "0", "displayName"},
+		bootstrapTargetName,
+	)
 	assertNestedStringField(t, createPayload, []string{"targetPools", "0", "targets", "0", "ip"}, bootstrapTargetIP)
 	assertNestedStringField(t, createPayload, []string{"listeners", "0", "targetPool"}, apiserverTargetPoolName)
 }
@@ -220,7 +225,8 @@ func TestSDKClientLoadBalancerTargetUpdates(t *testing.T) {
 			writeJSON(t, w, sdkLoadBalancerJSON("apiserver-test", "203.0.113.10", []any{
 				map[string]any{"name": apiserverTargetPoolName, "targetPort": 6443, "targets": targets},
 			}))
-		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/load-balancers/apiserver-test/target-pools/"+apiserverTargetPoolName):
+		case r.Method == http.MethodPut &&
+			strings.HasSuffix(r.URL.Path, "/load-balancers/apiserver-test/target-pools/"+apiserverTargetPoolName):
 			payload := readJSON(t, r)
 			updatePayloads = append(updatePayloads, payload)
 			next, ok := lookup(payload, "targets").([]any)

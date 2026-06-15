@@ -415,7 +415,10 @@ func (c *Client) ListSecurityGroupsByTags(_ context.Context, tags map[string]str
 	return securityGroups, nil
 }
 
-func (c *Client) EnsureAPIServerLoadBalancer(_ context.Context, input cloud.LoadBalancerInput) (*cloud.LoadBalancer, error) {
+func (c *Client) EnsureAPIServerLoadBalancer(
+	_ context.Context,
+	input cloud.LoadBalancerInput,
+) (*cloud.LoadBalancer, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -448,7 +451,10 @@ func (c *Client) EnsureAPIServerLoadBalancer(_ context.Context, input cloud.Load
 	return &out, nil
 }
 
-func (c *Client) ListAPIServerLoadBalancersByTags(_ context.Context, tags map[string]string) ([]*cloud.LoadBalancer, error) {
+func (c *Client) ListAPIServerLoadBalancersByTags(
+	_ context.Context,
+	tags map[string]string,
+) ([]*cloud.LoadBalancer, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

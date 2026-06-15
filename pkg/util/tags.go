@@ -55,7 +55,10 @@ func ClusterTags(clusterName, clusterNamespace string, additionalLabels map[stri
 // MachineTags returns the canonical tags applied to per-machine cloud
 // resources (e.g. VMs). additionalLabels is merged in last so the provider's
 // own tags cannot be overwritten.
-func MachineTags(clusterName, clusterNamespace, machineName, machineUID string, additionalLabels map[string]string) map[string]string {
+func MachineTags(
+	clusterName, clusterNamespace, machineName, machineUID string,
+	additionalLabels map[string]string,
+) map[string]string {
 	out := map[string]string{
 		LabelClusterName:      clusterName,
 		LabelClusterNamespace: clusterNamespace,

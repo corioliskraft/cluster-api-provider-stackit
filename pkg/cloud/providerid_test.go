@@ -80,7 +80,12 @@ func TestProviderIDMatchesCloudProviderStackitFormat(t *testing.T) {
 		t.Fatalf("ParseProviderID(%q) error = %v", providerID, err)
 	}
 	if projectID != "" || region != "" {
-		t.Fatalf("ParseProviderID(%q) returned project/region %q/%q, want empty because cloud-provider-stackit does not encode them", providerID, projectID, region)
+		t.Fatalf(
+			"ParseProviderID(%q) returned project/region %q/%q, want empty because cloud-provider-stackit does not encode them",
+			providerID,
+			projectID,
+			region,
+		)
 	}
 	if parsedServerID != serverID {
 		t.Fatalf("ParseProviderID(%q) serverID = %q, want %q", providerID, parsedServerID, serverID)

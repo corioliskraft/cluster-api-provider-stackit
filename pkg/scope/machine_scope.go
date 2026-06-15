@@ -35,18 +35,18 @@ type MachineScope struct {
 // NewMachineScope constructs a MachineScope and snapshots the original
 // StackitMachine for patching.
 func NewMachineScope(
-	client client.Client,
+	k8sClient client.Client,
 	cluster *clusterv1.Cluster,
 	machine *clusterv1.Machine,
 	stackitCluster *infrav1.StackitCluster,
 	stackitMachine *infrav1.StackitMachine,
 ) (*MachineScope, error) {
-	ph, err := patch.NewHelper(stackitMachine, client)
+	ph, err := patch.NewHelper(stackitMachine, k8sClient)
 	if err != nil {
 		return nil, err
 	}
 	return &MachineScope{
-		Client:         client,
+		Client:         k8sClient,
 		Cluster:        cluster,
 		Machine:        machine,
 		StackitCluster: stackitCluster,

@@ -35,13 +35,13 @@ type ClusterScope struct {
 
 // NewClusterScope constructs a ClusterScope and snapshots the original
 // resource so the patchHelper can compute a minimal patch on close.
-func NewClusterScope(client client.Client, cluster *clusterv1.Cluster, sc *infrav1.StackitCluster) (*ClusterScope, error) {
-	ph, err := patch.NewHelper(sc, client)
+func NewClusterScope(k8sClient client.Client, cluster *clusterv1.Cluster, sc *infrav1.StackitCluster) (*ClusterScope, error) {
+	ph, err := patch.NewHelper(sc, k8sClient)
 	if err != nil {
 		return nil, err
 	}
 	return &ClusterScope{
-		Client:         client,
+		Client:         k8sClient,
 		Cluster:        cluster,
 		StackitCluster: sc,
 		patchHelper:    ph,

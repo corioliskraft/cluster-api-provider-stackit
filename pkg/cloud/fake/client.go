@@ -15,6 +15,8 @@ package fake
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/voigt/cluster-api-provider-stackit/pkg/cloud"
@@ -598,9 +600,7 @@ func copyTags(in map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 
@@ -618,12 +618,7 @@ func securityGroupSet(ids []string) map[string]struct{} {
 }
 
 func containsString(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, needle)
 }
 
 func (c *Client) publicIPByTags(tags map[string]string) *cloud.PublicIP {

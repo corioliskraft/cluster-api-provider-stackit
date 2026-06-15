@@ -30,7 +30,7 @@ const (
 )
 
 func TestSDKClientCreateServerUsesExpectedPayload(t *testing.T) {
-	var createPayload map[string]interface{}
+	var createPayload map[string]any
 	server := newSDKTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/servers"):
@@ -40,19 +40,19 @@ func TestSDKClientCreateServerUsesExpectedPayload(t *testing.T) {
 			if got := r.URL.Query().Get("details"); got != "true" {
 				t.Fatalf("details = %q, want true", got)
 			}
-			writeJSON(t, w, map[string]interface{}{"items": []interface{}{}})
+			writeJSON(t, w, map[string]any{"items": []any{}})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/servers"):
 			createPayload = readJSON(t, r)
-			writeJSON(t, w, map[string]interface{}{
+			writeJSON(t, w, map[string]any{
 				"id":          testSDKServerID,
 				"machineType": "c2i.2",
 				"name":        "node-0",
 				"status":      "ACTIVE",
 			})
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/servers/"+testSDKServerID+"/nics"):
-			writeJSON(t, w, map[string]interface{}{
-				"items": []interface{}{
-					map[string]interface{}{"ipv4": "10.0.0.10", "ipv6": "fd00::10"},
+			writeJSON(t, w, map[string]any{
+				"items": []any{
+					map[string]any{"ipv4": "10.0.0.10", "ipv6": "fd00::10"},
 				},
 			})
 		default:
@@ -102,7 +102,7 @@ func TestSDKClientCreateServerUsesExpectedPayload(t *testing.T) {
 	assertNestedNumberField(t, createPayload, []string{"bootVolume", "size"}, 50)
 }
 
-func assertFieldAbsent(t *testing.T, payload map[string]interface{}, key string) {
+func assertFieldAbsent(t *testing.T, payload map[string]any, key string) {
 	t.Helper()
 	if _, ok := payload[key]; ok {
 		t.Fatalf("%s present in payload, want absent: %#v", key, payload[key])
@@ -110,16 +110,16 @@ func assertFieldAbsent(t *testing.T, payload map[string]interface{}, key string)
 }
 
 func TestSDKClientEnsureAPIServerLoadBalancerCreatesExpectedPayload(t *testing.T) {
-	var createPayload map[string]interface{}
+	var createPayload map[string]any
 	server := newSDKTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/load-balancers"):
-			writeJSON(t, w, map[string]interface{}{"loadBalancers": []interface{}{}})
+			writeJSON(t, w, map[string]any{"loadBalancers": []any{}})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/load-balancers"):
 			createPayload = readJSON(t, r)
-			writeJSON(t, w, sdkLoadBalancerJSON("apiserver-test", "203.0.113.10", []interface{}{
-				map[string]interface{}{"name": apiserverTargetPoolName, "targetPort": 6443, "targets": []interface{}{
-					map[string]interface{}{"displayName": "cp-0", "ip": "10.0.0.10"},
+			writeJSON(t, w, sdkLoadBalancerJSON("apiserver-test", "203.0.113.10", []any{
+				map[string]any{"name": apiserverTargetPoolName, "targetPort": 6443, "targets": []any{
+					map[string]any{"displayName": "cp-0", "ip": "10.0.0.10"},
 				}},
 			}))
 		default:
@@ -165,16 +165,16 @@ func TestSDKClientEnsureAPIServerLoadBalancerCreatesExpectedPayload(t *testing.T
 }
 
 func TestSDKClientEnsureAPIServerLoadBalancerUsesBootstrapTargetWhenInitialTargetsAreEmpty(t *testing.T) {
-	var createPayload map[string]interface{}
+	var createPayload map[string]any
 	server := newSDKTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/load-balancers"):
-			writeJSON(t, w, map[string]interface{}{"loadBalancers": []interface{}{}})
+			writeJSON(t, w, map[string]any{"loadBalancers": []any{}})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/load-balancers"):
 			createPayload = readJSON(t, r)
-			writeJSON(t, w, sdkLoadBalancerJSON("apiserver-test", "203.0.113.10", []interface{}{
-				map[string]interface{}{"name": apiserverTargetPoolName, "targetPort": 6443, "targets": []interface{}{
-					map[string]interface{}{"displayName": bootstrapTargetName, "ip": bootstrapTargetIP},
+			writeJSON(t, w, sdkLoadBalancerJSON("apiserver-test", "203.0.113.10", []any{
+				map[string]any{"name": apiserverTargetPoolName, "targetPort": 6443, "targets": []any{
+					map[string]any{"displayName": bootstrapTargetName, "ip": bootstrapTargetIP},
 				}},
 			}))
 		default:
@@ -206,10 +206,10 @@ func TestSDKClientEnsureAPIServerLoadBalancerUsesBootstrapTargetWhenInitialTarge
 
 func TestSDKClientLoadBalancerTargetUpdates(t *testing.T) {
 	var mu sync.Mutex
-	targets := []interface{}{
-		map[string]interface{}{"displayName": "cp-0", "ip": "10.0.0.10"},
+	targets := []any{
+		map[string]any{"displayName": "cp-0", "ip": "10.0.0.10"},
 	}
-	var updatePayloads []map[string]interface{}
+	var updatePayloads []map[string]any
 
 	server := newSDKTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -217,18 +217,18 @@ func TestSDKClientLoadBalancerTargetUpdates(t *testing.T) {
 
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/load-balancers/apiserver-test"):
-			writeJSON(t, w, sdkLoadBalancerJSON("apiserver-test", "203.0.113.10", []interface{}{
-				map[string]interface{}{"name": apiserverTargetPoolName, "targetPort": 6443, "targets": targets},
+			writeJSON(t, w, sdkLoadBalancerJSON("apiserver-test", "203.0.113.10", []any{
+				map[string]any{"name": apiserverTargetPoolName, "targetPort": 6443, "targets": targets},
 			}))
 		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/load-balancers/apiserver-test/target-pools/"+apiserverTargetPoolName):
 			payload := readJSON(t, r)
 			updatePayloads = append(updatePayloads, payload)
-			next, ok := lookup(payload, "targets").([]interface{})
+			next, ok := lookup(payload, "targets").([]any)
 			if !ok {
 				t.Fatalf("update target payload missing targets: %#v", payload)
 			}
 			targets = next
-			writeJSON(t, w, map[string]interface{}{
+			writeJSON(t, w, map[string]any{
 				"name":       apiserverTargetPoolName,
 				"targetPort": 6443,
 				"targets":    targets,
@@ -257,7 +257,7 @@ func TestSDKClientLoadBalancerTargetUpdates(t *testing.T) {
 	}
 	assertNestedStringField(t, updatePayloads[0], []string{"targets", "1", "displayName"}, "cp-1")
 	assertNestedStringField(t, updatePayloads[0], []string{"targets", "1", "ip"}, "10.0.0.11")
-	if got := nestedValue(t, updatePayloads[1], []string{"targets"}).([]interface{}); len(got) != 1 {
+	if got := nestedValue(t, updatePayloads[1], []string{"targets"}).([]any); len(got) != 1 {
 		t.Fatalf("delete target payload targets = %#v, want one remaining target", got)
 	}
 	assertNestedStringField(t, updatePayloads[1], []string{"targets", "0", "displayName"}, "cp-0")
@@ -324,28 +324,28 @@ func newTestSDKClient(t *testing.T, endpoint string) *SDKClient {
 	return sdkClient
 }
 
-func sdkLoadBalancerJSON(name, externalAddress string, targetPools []interface{}) map[string]interface{} {
-	return map[string]interface{}{
+func sdkLoadBalancerJSON(name, externalAddress string, targetPools []any) map[string]any {
+	return map[string]any{
 		"name":            name,
 		"externalAddress": externalAddress,
-		"listeners": []interface{}{
-			map[string]interface{}{"displayName": apiserverListenerName, "port": 6443, "targetPool": apiserverTargetPoolName},
+		"listeners": []any{
+			map[string]any{"displayName": apiserverListenerName, "port": 6443, "targetPool": apiserverTargetPoolName},
 		},
 		"targetPools": targetPools,
 	}
 }
 
-func readJSON(t *testing.T, r *http.Request) map[string]interface{} {
+func readJSON(t *testing.T, r *http.Request) map[string]any {
 	t.Helper()
 
-	var out map[string]interface{}
+	var out map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&out); err != nil {
 		t.Fatalf("decode request body: %v", err)
 	}
 	return out
 }
 
-func writeJSON(t *testing.T, w http.ResponseWriter, value interface{}) {
+func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
 	t.Helper()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -354,50 +354,50 @@ func writeJSON(t *testing.T, w http.ResponseWriter, value interface{}) {
 	}
 }
 
-func assertStringField(t *testing.T, m map[string]interface{}, key, want string) {
+func assertStringField(t *testing.T, m map[string]any, key, want string) {
 	t.Helper()
 	if got := lookup(m, key); got != want {
 		t.Fatalf("%s = %#v, want %q in %#v", key, got, want, m)
 	}
 }
 
-func assertBoolField(t *testing.T, m map[string]interface{}, key string, want bool) {
+func assertBoolField(t *testing.T, m map[string]any, key string, want bool) {
 	t.Helper()
 	if got := lookup(m, key); got != want {
 		t.Fatalf("%s = %#v, want %t in %#v", key, got, want, m)
 	}
 }
 
-func assertNestedStringField(t *testing.T, m map[string]interface{}, path []string, want string) {
+func assertNestedStringField(t *testing.T, m map[string]any, path []string, want string) {
 	t.Helper()
 	if got := nestedValue(t, m, path); got != want {
 		t.Fatalf("%s = %#v, want %q in %#v", strings.Join(path, "."), got, want, m)
 	}
 }
 
-func assertNestedBoolField(t *testing.T, m map[string]interface{}, path []string, want bool) {
+func assertNestedBoolField(t *testing.T, m map[string]any, path []string, want bool) {
 	t.Helper()
 	if got := nestedValue(t, m, path); got != want {
 		t.Fatalf("%s = %#v, want %t in %#v", strings.Join(path, "."), got, want, m)
 	}
 }
 
-func assertNestedNumberField(t *testing.T, m map[string]interface{}, path []string, want float64) {
+func assertNestedNumberField(t *testing.T, m map[string]any, path []string, want float64) {
 	t.Helper()
 	if got := nestedValue(t, m, path); got != want {
 		t.Fatalf("%s = %#v, want %v in %#v", strings.Join(path, "."), got, want, m)
 	}
 }
 
-func nestedValue(t *testing.T, m map[string]interface{}, path []string) interface{} {
+func nestedValue(t *testing.T, m map[string]any, path []string) any {
 	t.Helper()
 
-	var current interface{} = m
+	var current any = m
 	for _, part := range path {
 		switch typed := current.(type) {
-		case map[string]interface{}:
+		case map[string]any:
 			current = lookup(typed, part)
-		case []interface{}:
+		case []any:
 			if len(part) != 1 || part[0] < '0' || part[0] > '9' {
 				t.Fatalf("path element %q cannot index %#v", part, typed)
 			}
@@ -413,7 +413,7 @@ func nestedValue(t *testing.T, m map[string]interface{}, path []string) interfac
 	return current
 }
 
-func lookup(m map[string]interface{}, key string) interface{} {
+func lookup(m map[string]any, key string) any {
 	for _, candidate := range []string{
 		key,
 		strings.ToUpper(key[:1]) + key[1:],

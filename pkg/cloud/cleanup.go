@@ -13,6 +13,7 @@ package cloud
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -26,9 +27,7 @@ func CleanupByTags(ctx context.Context, client Client, tags map[string]string) e
 
 	var errs []string
 	bastionTags := make(map[string]string, len(tags)+1)
-	for key, value := range tags {
-		bastionTags[key] = value
-	}
+	maps.Copy(bastionTags, tags)
 	bastionTags["cluster-api-provider-stackit/resource-role"] = "bastion"
 	if err := client.DeleteBastion(ctx, BastionInput{Tags: bastionTags}, Bastion{}); err != nil && !IsNotFound(err) {
 		errs = append(errs, fmt.Sprintf("delete bastion resources: %v", err))

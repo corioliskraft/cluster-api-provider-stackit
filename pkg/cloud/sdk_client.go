@@ -943,7 +943,7 @@ func labelSelector(tags map[string]string) string {
 	return strings.Join(parts, ",")
 }
 
-func labelsContainTags(labels map[string]interface{}, tags map[string]string) bool {
+func labelsContainTags(labels map[string]any, tags map[string]string) bool {
 	for k, want := range tags {
 		got, ok := labels[k]
 		if !ok || fmt.Sprint(got) != want {
@@ -953,8 +953,8 @@ func labelsContainTags(labels map[string]interface{}, tags map[string]string) bo
 	return true
 }
 
-func tagsToSDKLabels(tags map[string]string) map[string]interface{} {
-	out := make(map[string]interface{}, len(tags))
+func tagsToSDKLabels(tags map[string]string) map[string]any {
+	out := make(map[string]any, len(tags))
 	for k, v := range tags {
 		out[k] = v
 	}

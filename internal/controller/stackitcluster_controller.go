@@ -265,7 +265,7 @@ func bootstrapTargetIP(network *cloud.Network) string {
 			continue
 		}
 		address := prefix.Masked().Addr()
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			address = address.Next()
 		}
 		if prefix.Contains(address) {

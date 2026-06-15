@@ -21,6 +21,7 @@ import (
 	"net/netip"
 	"reflect"
 	"regexp"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -324,12 +325,5 @@ func validateDNS1123Subdomain(value string, fldPath *field.Path) field.ErrorList
 }
 
 func joinValidationErrors(errs []string) string {
-	if len(errs) == 0 {
-		return ""
-	}
-	out := errs[0]
-	for _, err := range errs[1:] {
-		out += "; " + err
-	}
-	return out
+	return strings.Join(errs, "; ")
 }

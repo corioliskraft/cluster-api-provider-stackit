@@ -106,7 +106,7 @@ func (r *StackitClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	setPausedCondition(&stackitCluster.Status.Conditions, stackitCluster.Generation, false, "")
 
 	if !stackitCluster.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, clusterScope)
+		return ctrl.Result{}, r.reconcileDelete(ctx, clusterScope)
 	}
 	return r.reconcileNormal(ctx, clusterScope)
 }
@@ -369,7 +369,7 @@ func (r *StackitClusterReconciler) reconcileBastion(
 	return ctrl.Result{}, true, nil
 }
 
-func (r *StackitClusterReconciler) reconcileDelete(ctx context.Context, s *scope.ClusterScope) (ctrl.Result, error) {
+func (r *StackitClusterReconciler) reconcileDelete(ctx context.Context, s *scope.ClusterScope) error {
 	sc := s.StackitCluster
 	if sc.Status.APIServerLoadBalancerID != "" || hasBastionStatus(sc.Status.Bastion) {
 		cloudClient, err := r.buildCloudClient(ctx, sc)
@@ -379,17 +379,17 @@ func (r *StackitClusterReconciler) reconcileDelete(ctx context.Context, s *scope
 			// deletion succeeding (or being already absent).
 			util.SetCondition(&sc.Status.Conditions, infrav1.ClusterCredentialsReadyCondition,
 				metav1.ConditionFalse, "CredentialsInvalid", err.Error(), sc.Generation)
-			return ctrl.Result{}, err
+			return err
 		}
 		if sc.Status.APIServerLoadBalancerID != "" {
 			if err := cloudClient.DeleteAPIServerLoadBalancer(ctx, sc.Status.APIServerLoadBalancerID); err != nil && !cloud.IsNotFound(err) {
-				return ctrl.Result{}, err
+				return err
 			}
 			sc.Status.APIServerLoadBalancerID = ""
 		}
 		if hasBastionStatus(sc.Status.Bastion) {
 			if err := cloudClient.DeleteNodeSSHAccess(ctx, nodeSSHAccessTags(sc)); err != nil && !cloud.IsNotFound(err) {
-				return ctrl.Result{}, err
+				return err
 			}
 			if err := cloudClient.DeleteBastion(ctx, bastionInput(sc, nil), cloud.Bastion{
 				ServerID:        sc.Status.Bastion.ServerID,
@@ -397,13 +397,13 @@ func (r *StackitClusterReconciler) reconcileDelete(ctx context.Context, s *scope
 				PublicIP:        sc.Status.Bastion.PublicIP,
 				SecurityGroupID: sc.Status.Bastion.SecurityGroupID,
 			}); err != nil && !cloud.IsNotFound(err) {
-				return ctrl.Result{}, err
+				return err
 			}
 			sc.Status.Bastion = infrav1.StackitBastionStatus{}
 		}
 	}
 	controllerutil.RemoveFinalizer(sc, infrav1.ClusterFinalizer)
-	return ctrl.Result{}, nil
+	return nil
 }
 
 func bastionInput(sc *infrav1.StackitCluster, cloudInit []byte) cloud.BastionInput {

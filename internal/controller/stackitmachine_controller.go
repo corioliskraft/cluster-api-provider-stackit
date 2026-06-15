@@ -115,7 +115,7 @@ func (r *StackitMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	setPausedCondition(&stackitMachine.Status.Conditions, stackitMachine.Generation, false, "")
 
 	if !stackitMachine.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, machineScope)
+		return ctrl.Result{}, r.reconcileDelete(ctx, machineScope)
 	}
 	return r.reconcileNormal(ctx, machineScope)
 }
@@ -240,35 +240,35 @@ func validateMachineAvailabilityZone(s *scope.MachineScope) error {
 	return fmt.Errorf("availabilityZone %q is not published in StackitCluster status.failureDomains", availabilityZone)
 }
 
-func (r *StackitMachineReconciler) reconcileDelete(ctx context.Context, s *scope.MachineScope) (ctrl.Result, error) {
+func (r *StackitMachineReconciler) reconcileDelete(ctx context.Context, s *scope.MachineScope) error {
 	sm := s.StackitMachine
 	needsLoadBalancerCleanup := isControlPlaneMachine(s.Machine) &&
 		s.StackitCluster.Spec.APIServerLoadBalancer.Enabled &&
 		s.StackitCluster.Status.APIServerLoadBalancerID != ""
 	if sm.Status.InstanceID == "" && !needsLoadBalancerCleanup {
 		controllerutil.RemoveFinalizer(sm, infrav1.MachineFinalizer)
-		return ctrl.Result{}, nil
+		return nil
 	}
 	cloudClient, err := r.buildCloudClient(ctx, s.StackitCluster)
 	if err != nil {
 		util.SetCondition(&sm.Status.Conditions, infrav1.MachineCredentialsReadyCondition,
 			metav1.ConditionFalse, "CredentialsInvalid", err.Error(), sm.Generation)
-		return ctrl.Result{}, err
+		return err
 	}
 	if err := r.deleteAPIServerLoadBalancerTarget(ctx, cloudClient, s); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 	if sm.Status.InstanceID == "" {
 		controllerutil.RemoveFinalizer(sm, infrav1.MachineFinalizer)
-		return ctrl.Result{}, nil
+		return nil
 	}
 	if err := cloudClient.DeleteServer(ctx, sm.Status.InstanceID); err != nil && !cloud.IsNotFound(err) {
-		return ctrl.Result{}, err
+		return err
 	}
 	sm.Status.InstanceID = ""
 	sm.Status.InstanceState = ""
 	controllerutil.RemoveFinalizer(sm, infrav1.MachineFinalizer)
-	return ctrl.Result{}, nil
+	return nil
 }
 
 func (r *StackitMachineReconciler) fetchBootstrapData(ctx context.Context, machine *clusterv1.Machine) ([]byte, metav1.ConditionStatus, string, string) {

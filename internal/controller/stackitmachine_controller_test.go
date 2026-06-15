@@ -97,7 +97,7 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("does not create a VM when the bootstrap Secret is missing", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
@@ -110,8 +110,8 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("creates a VM and sets provider status when bootstrap data is available", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
-		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName)
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
@@ -133,8 +133,8 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("attaches provider-managed node SSH access when bastion is enabled", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
-		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName)
 		stackitCluster := &infrav1.StackitCluster{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName, Namespace: namespace}, stackitCluster)).To(Succeed())
 		stackitCluster.Spec.Bastion = validBastionSpec()
@@ -162,8 +162,8 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("does not create a VM when availabilityZone is outside published failure domains", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
-		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName)
 		got := &infrav1.StackitMachine{}
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		got.Spec.AvailabilityZone = "eu01-9"
@@ -181,8 +181,8 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("marks credentials invalid without requeueing on unauthorized credentials", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
-		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName)
 		reconciler.CloudClientFactory = func(context.Context, cloud.Credentials) (cloud.Client, error) {
 			return nil, fmt.Errorf("authenticate: %w", cloud.ErrUnauthorized)
 		}
@@ -199,8 +199,8 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("does not call the cloud API when the owning Cluster is paused", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
-		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName)
 		cluster := &clusterv1.Cluster{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName, Namespace: namespace}, cluster)).To(Succeed())
 		cluster.Spec.Paused = ptr.To(true)
@@ -224,8 +224,8 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("does not call the cloud API when the StackitMachine has the paused annotation", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
-		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName)
 		got := &infrav1.StackitMachine{}
 		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
 		got.Annotations = map[string]string{clusterv1.PausedAnnotation: ""}
@@ -248,8 +248,8 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("requeues when server lookup returns a conflict", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
-		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName)
 		fakeCloud.FailNextFindServer = fmt.Errorf("multiple matching servers: %w", cloud.ErrConflict)
 
 		result, err := reconciler.Reconcile(ctx, request)
@@ -264,8 +264,8 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("requeues when VM creation returns a transient error", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
-		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName)
 		fakeCloud.FailNextCreateServer = fmt.Errorf("create server timeout: %w", cloud.ErrTransient)
 
 		result, err := reconciler.Reconcile(ctx, request)
@@ -280,10 +280,10 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("registers control plane VMs as API server load balancer targets", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
 		updateMachineControlPlaneLabel(ctx, machineName, namespace)
 		enableStackitClusterLoadBalancer(ctx, clusterName, namespace)
-		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		createBootstrapSecret(ctx, bootstrapName)
 
 		result, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
@@ -299,9 +299,9 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("requeues when load balancer target registration returns a transient error", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
 		updateMachineControlPlaneLabel(ctx, machineName, namespace)
-		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		createBootstrapSecret(ctx, bootstrapName)
 		loadBalancerID := createAPIServerLoadBalancer(ctx, fakeCloud)
 		updateStackitClusterLoadBalancer(ctx, clusterName, namespace, loadBalancerID)
 		fakeCloud.FailNextEnsureTarget = fmt.Errorf("update target pool timeout: %w", cloud.ErrTransient)
@@ -316,10 +316,10 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("deletes the VM and removes the finalizer", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
 		updateMachineControlPlaneLabel(ctx, machineName, namespace)
 		enableStackitClusterLoadBalancer(ctx, clusterName, namespace)
-		createBootstrapSecret(ctx, bootstrapName, namespace, "bootstrap-data")
+		createBootstrapSecret(ctx, bootstrapName)
 		_, err := reconciler.Reconcile(ctx, request)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fakeCloud.ServerCount()).To(Equal(1))
@@ -361,7 +361,7 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("maps bootstrap Secret events to StackitMachine reconcile requests", func() {
-		updateMachineBootstrapSecret(ctx, machineName, namespace, bootstrapName)
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
 		secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: bootstrapName, Namespace: namespace}}
 
 		requests := reconciler.stackitMachineRequestsForBootstrapSecret(ctx, secret)

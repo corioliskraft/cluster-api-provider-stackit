@@ -42,11 +42,11 @@ func createCredentialsSecret(ctx context.Context, name, namespace, projectID str
 	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 }
 
-func createBootstrapSecret(ctx context.Context, name, namespace, value string) {
+func createBootstrapSecret(ctx context.Context, name string) {
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
 		Data: map[string][]byte{
-			"value": []byte(value),
+			"value": []byte("bootstrap-data"),
 		},
 	}
 	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
@@ -125,9 +125,9 @@ func createReadyStackitCluster(ctx context.Context, name, namespace, credentials
 	Expect(k8sClient.Status().Update(ctx, stackitCluster)).To(Succeed())
 }
 
-func updateMachineBootstrapSecret(ctx context.Context, name, namespace, bootstrapSecretName string) {
+func updateMachineBootstrapSecret(ctx context.Context, name, bootstrapSecretName string) {
 	machine := &clusterv1.Machine{}
-	Expect(k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, machine)).To(Succeed())
+	Expect(k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: "default"}, machine)).To(Succeed())
 	machine.Spec.Bootstrap.DataSecretName = &bootstrapSecretName
 	Expect(k8sClient.Update(ctx, machine)).To(Succeed())
 }

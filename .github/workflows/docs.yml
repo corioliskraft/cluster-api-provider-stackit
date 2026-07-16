@@ -5,14 +5,14 @@ on:
     branches:
       - main
     paths:
-      - .github/workflows/publish-docs.yml
+      - .github/workflows/docs.yml
       - common.mk
       - versions.mk
       - docs/**
       - hack/tools/**
   pull_request:
     paths:
-      - .github/workflows/publish-docs.yml
+      - .github/workflows/docs.yml
       - common.mk
       - versions.mk
       - docs/**
@@ -21,6 +21,8 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -59,9 +61,6 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

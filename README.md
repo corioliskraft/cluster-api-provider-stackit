@@ -22,9 +22,9 @@ Cluster API Provider STACKIT is abbreviated as CAPSTK.
 
 > ### ⚠️ WARNING ⚠️ 
 > 
-> **`cluster-api-provider-stackit` is not an official STACKIT project. It has been developed almost exclusively through AI-assisted tooling by a single person.**
+> **`cluster-api-provider-stackit` is not an officially supported STACKIT project and is still in active development.**
 > 
-> The implementation is validated through end-to-end tests, but it has not yet received the same level of manual review, production hardening, or long-term operational validation as a mature provider.
+> The implementation is validated through end-to-end tests, but it has not yet received the same level of quality reviews, production hardening, or long-term operational validation as a mature provider or officially supported STACKIT projects.
 > 
 > Use at your own risk. Please review the code carefully before using it in production environments.
 

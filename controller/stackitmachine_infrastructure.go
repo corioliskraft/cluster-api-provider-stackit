@@ -73,6 +73,7 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 
 	server, created, err := r.ensureServer(ctx, cloudClient, s, bootstrapData)
 	if err != nil {
+		s.SetNotReady("InstanceError", err.Error(), infrav1.MachineInstanceReadyCondition, infrav1.MachineReadyCondition)
 		return util.CloudFailureResult(
 			&sm.Status.Conditions,
 			sm.Generation,
@@ -100,6 +101,7 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 	}
 
 	if err := r.reconcileBastionNodeSSHAccess(ctx, cloudClient, s, server); err != nil {
+		s.SetNotReady("BastionSSHAccessError", err.Error(), infrav1.MachineReadyCondition)
 		return util.CloudFailureResult(
 			&sm.Status.Conditions,
 			sm.Generation,
@@ -112,6 +114,7 @@ func (r *StackitMachineReconciler) reconcileNormal(ctx context.Context, s *scope
 	}
 
 	if err := r.reconcileAPIServerLoadBalancerTarget(ctx, cloudClient, s, server); err != nil {
+		s.SetNotReady("LoadBalancerTargetError", err.Error(), infrav1.MachineReadyCondition)
 		return util.CloudFailureResult(
 			&sm.Status.Conditions,
 			sm.Generation,

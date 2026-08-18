@@ -433,13 +433,14 @@ func lookup(m map[string]any, key string) any {
 	return nil
 }
 
-// TestSDKClientEnsureBastionAttachesSecurityGroupOnlyOnce guards against the
-// redundant security-group attach that used to follow CreateServer. The group
-// is already part of the create payload; attaching it again failed with 404
-// while the server had no port yet and with 400 "Duplicate items in the list"
-// once it had one — and the error aborted EnsureBastion before the public IP
-// was assigned.
-func TestSDKClientEnsureBastionAttachesSecurityGroupOnlyOnce(t *testing.T) {
+// TestSDKClientEnsureBastionToleratesDuplicateSecurityGroupAttach guards the
+// idempotency of the security-group attach. The group is already in the create
+// payload, so the attach usually hits a duplicate ("400 Duplicate items in the
+// list") or a server without a port yet ("404 ... as device id on any ports").
+// Neither may abort EnsureBastion — that used to leave the public IP unassigned
+// for a full reconcile cycle. The attach itself is kept because CreateServer
+// short-circuits on an existing server, making this the only re-attach path.
+func TestSDKClientEnsureBastionToleratesDuplicateSecurityGroupAttach(t *testing.T) {
 	var (
 		createPayload    map[string]any
 		attachCallCount  int
@@ -467,10 +468,13 @@ func TestSDKClientEnsureBastionAttachesSecurityGroupOnlyOnce(t *testing.T) {
 				"id": testSDKServerID, "name": "bastion", "status": "ACTIVE", "machineType": "c2i.1",
 			})
 		case strings.Contains(path, "/security-groups/") && strings.Contains(path, "/servers/"):
-			// PUT /servers/{id}/security-groups/{id} or the inverse ordering:
-			// any call here is the redundant attach this test guards against.
+			// Answer the way the real API does for an already-attached group.
 			attachCallCount++
-			w.WriteHeader(http.StatusNoContent)
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(t, w, map[string]any{
+				"code": 400,
+				"msg":  "request invalid: Invalid input for security_groups. Reason: Duplicate items in the list.",
+			})
 		case r.Method == http.MethodGet && strings.HasSuffix(path, "/public-ips"):
 			writeJSON(t, w, map[string]any{"items": []any{}})
 		case r.Method == http.MethodPost && strings.HasSuffix(path, "/public-ips"):
@@ -503,8 +507,8 @@ func TestSDKClientEnsureBastionAttachesSecurityGroupOnlyOnce(t *testing.T) {
 		t.Fatalf("EnsureBastion() error = %v", err)
 	}
 
-	if attachCallCount != 0 {
-		t.Fatalf("security group attached %d extra time(s) after CreateServer, want 0", attachCallCount)
+	if attachCallCount != 1 {
+		t.Fatalf("attach attempted %d time(s), want exactly 1 (the idempotent re-attach)", attachCallCount)
 	}
 	groups, _ := createPayload["securityGroups"].([]any)
 	if len(groups) != 1 || groups[0] != testSDKSecurityGroup {
@@ -554,6 +558,8 @@ func TestSDKClientEnsureBastionRevokesRemovedCIDR(t *testing.T) {
 				createdRuleCIDRs = append(createdRuleCIDRs, cidr)
 			}
 			writeJSON(t, w, map[string]any{"id": "77777777-7777-4777-8777-777777777777", "direction": "ingress"})
+		case strings.Contains(path, "/security-groups/") && strings.Contains(path, "/servers/"):
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && strings.Contains(path, "/rules/"):
 			parts := strings.Split(strings.TrimSuffix(path, "/"), "/")
 			deletedRuleIDs = append(deletedRuleIDs, parts[len(parts)-1])
@@ -601,5 +607,76 @@ func TestSDKClientEnsureBastionRevokesRemovedCIDR(t *testing.T) {
 	}
 	if len(deletedRuleIDs) != 1 || deletedRuleIDs[0] != staleRuleID {
 		t.Fatalf("deleted rules %v, want [%s] — the revoked CIDR keeps its SSH access", deletedRuleIDs, staleRuleID)
+	}
+}
+
+// TestSDKClientEnsureBastionDeduplicatesRepeatedCIDRs guards against a CIDR
+// listed twice producing two identical rules: existingRules is a snapshot taken
+// before the loop, so the second pass would not see the rule the first pass
+// created and the duplicate create fails the whole reconcile.
+func TestSDKClientEnsureBastionDeduplicatesRepeatedCIDRs(t *testing.T) {
+	var createdRuleCIDRs []string
+	server := newSDKTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(path, "/security-groups"):
+			writeJSON(t, w, map[string]any{"items": []any{
+				map[string]any{
+					"id": testSDKSecurityGroup, "name": "bastion-ssh",
+					"labels": map[string]any{"cluster": "test"},
+				},
+			}})
+		case r.Method == http.MethodGet && strings.HasSuffix(path, "/rules"):
+			writeJSON(t, w, map[string]any{"items": []any{}})
+		case r.Method == http.MethodPost && strings.HasSuffix(path, "/rules"):
+			payload := readJSON(t, r)
+			if cidr, ok := payload["ipRange"].(string); ok {
+				createdRuleCIDRs = append(createdRuleCIDRs, cidr)
+			}
+			writeJSON(t, w, map[string]any{"id": "77777777-7777-4777-8777-777777777777", "direction": "ingress"})
+		case r.Method == http.MethodGet && strings.HasSuffix(path, "/servers"):
+			writeJSON(t, w, map[string]any{"items": []any{
+				map[string]any{
+					"id": testSDKServerID, "name": "bastion", "status": "ACTIVE", "machineType": "c2i.1",
+					"labels": map[string]any{"cluster": "test"},
+				},
+			}})
+		case strings.Contains(path, "/security-groups/") && strings.Contains(path, "/servers/"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && strings.HasSuffix(path, "/public-ips"):
+			writeJSON(t, w, map[string]any{"items": []any{
+				map[string]any{
+					"id": "66666666-6666-4666-8666-666666666666", "ip": "203.0.113.10", "networkInterface": "nic-1",
+					"labels": map[string]any{"cluster": "test"},
+				},
+			}})
+		case r.Method == http.MethodGet && strings.Contains(path, "/servers/"):
+			writeJSON(t, w, map[string]any{
+				"id": testSDKServerID, "name": "bastion", "status": "ACTIVE", "machineType": "c2i.1",
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+
+	client := newTestSDKClient(t, server.URL)
+	if _, err := client.EnsureBastion(context.Background(), BastionInput{
+		Name:        "bastion",
+		ProjectID:   testSDKProjectID,
+		Region:      testSDKRegion,
+		NetworkID:   testSDKNetworkID,
+		ImageID:     testSDKImageID,
+		MachineType: "c2i.1",
+		SSHKeyName:  "default",
+		// The same CIDR twice, plus a distinct one.
+		AllowedCIDRs: []string{"203.0.113.0/24", "203.0.113.0/24", "198.51.100.0/24"},
+		Tags:         map[string]string{"cluster": "test"},
+	}); err != nil {
+		t.Fatalf("EnsureBastion() error = %v", err)
+	}
+
+	if len(createdRuleCIDRs) != 2 {
+		t.Fatalf("created %d rules (%v), want 2 — the repeated CIDR was created twice",
+			len(createdRuleCIDRs), createdRuleCIDRs)
 	}
 }

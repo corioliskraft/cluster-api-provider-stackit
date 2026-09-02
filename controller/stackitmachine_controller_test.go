@@ -321,6 +321,22 @@ var _ = Describe("StackitMachine Controller", func() {
 		expectCondition(got.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionFalse, "InstanceError")
 	})
 
+	It("returns an error when VM creation is rejected", func() {
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName)
+		fakeCloud.FailNextCreateServer = fmt.Errorf("create server rejected: %w", cloud.ErrInvalidInput)
+
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).To(HaveOccurred())
+		Expect(result).To(Equal(reconcile.Result{}))
+		Expect(fakeCloud.ServerCount()).To(Equal(0))
+
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		expectCondition(got.Status.Conditions, infrav1.MachineInstanceReadyCondition, metav1.ConditionFalse, "InstanceError")
+		expectCondition(got.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionFalse, "InstanceError")
+	})
+
 	It("registers control plane VMs as API server load balancer targets", func() {
 		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
 		updateMachineControlPlaneLabel(ctx, machineName, namespace)

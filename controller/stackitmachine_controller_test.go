@@ -157,8 +157,9 @@ var _ = Describe("StackitMachine Controller", func() {
 		Expect(fakeCloud.ServerCount()).To(Equal(0))
 
 		By("reconciling again")
-		_, err = reconciler.Reconcile(ctx, request)
-		Expect(err).To(HaveOccurred(), "reconcile must surface the missing server instead of papering over it")
+		result, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Equal(reconcile.Result{}))
 
 		Expect(fakeCloud.CreateServerCalls).To(Equal(1),
 			"a replacement server was created for an already-provisioned machine")
@@ -167,7 +168,8 @@ var _ = Describe("StackitMachine Controller", func() {
 		By("reporting a consistent readiness state")
 		degraded := &infrav1.StackitMachine{}
 		Expect(k8sClient.Get(ctx, stackitKey, degraded)).To(Succeed())
-		expectCondition(degraded.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionFalse, "InstanceError")
+		expectCondition(degraded.Status.Conditions, infrav1.MachineReadyCondition, metav1.ConditionFalse, "InstanceNotFound")
+		expectCondition(degraded.Status.Conditions, infrav1.MachineInstanceReadyCondition, metav1.ConditionFalse, "InstanceNotFound")
 		Expect(degraded.Status.Ready).To(BeFalse(),
 			"legacy status.ready must follow the Ready condition, not contradict it")
 	})

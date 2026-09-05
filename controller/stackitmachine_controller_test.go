@@ -462,11 +462,6 @@ var _ = Describe("StackitMachine Controller", func() {
 	})
 
 	It("keeps the finalizer when the server deletion fails", func() {
-		// The delete path removes the finalizer only after the cloud reports the
-		// server as deleted or as already gone. Any other delete error leaves the
-		// server running, so the object must stay and the reconcile must retry.
-		// Without the object, nothing holds the instance ID and the VM keeps
-		// running unnoticed.
 		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
 		createBootstrapSecret(ctx, bootstrapName)
 

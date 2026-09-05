@@ -461,6 +461,33 @@ var _ = Describe("StackitMachine Controller", func() {
 		}).Should(BeTrue())
 	})
 
+	It("keeps the finalizer when the server deletion fails", func() {
+		// The delete path removes the finalizer only after the cloud reports the
+		// server as deleted or as already gone. Any other delete error leaves the
+		// server running, so the object must stay and the reconcile must retry.
+		// Without the object, nothing holds the instance ID and the VM keeps
+		// running unnoticed.
+		updateMachineBootstrapSecret(ctx, machineName, bootstrapName)
+		createBootstrapSecret(ctx, bootstrapName)
+
+		_, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fakeCloud.ServerCount()).To(Equal(1))
+
+		got := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, got)).To(Succeed())
+		fakeCloud.FailNextDeleteServer = fmt.Errorf("delete server: %w", cloud.ErrTransient)
+
+		Expect(k8sClient.Delete(ctx, got)).To(Succeed())
+		_, err = reconciler.Reconcile(ctx, request)
+
+		Expect(err).To(MatchError(cloud.ErrTransient))
+		Expect(fakeCloud.ServerCount()).To(Equal(1))
+		stillThere := &infrav1.StackitMachine{}
+		Expect(k8sClient.Get(ctx, stackitKey, stillThere)).To(Succeed())
+		Expect(stillThere.Finalizers).To(ContainElement(infrav1.MachineFinalizer))
+	})
+
 	It("maps owning Machine events to StackitMachine reconcile requests", func() {
 		machine := &clusterv1.Machine{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: machineName, Namespace: namespace}, machine)).To(Succeed())

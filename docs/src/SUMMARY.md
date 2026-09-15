@@ -11,7 +11,6 @@
   - [Upgrade](usage/upgrade.md)
   - [Cleanup](usage/cleanup.md)
 -->
-- [clusterctl](usage/clusterctl.md)
 - [Topics](./topics/index.md)
   - [OS Images](./topics/images.md)
   - [Accessing VM instances](./topics/accessing-vm-instances.md)

@@ -49,7 +49,7 @@ providers:
 Install the provider:
 
 ```sh
-clusterctl init --config clusterctl.yaml --infrastructure stackit
+clusterctl init --config clusterctl.yaml --infrastructure stackit:v<version>
 ```
 
 ## Launching a Kubernetes cluster on STACKIT

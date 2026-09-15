@@ -105,7 +105,7 @@ Keep Helm out of scope unless maintainers explicitly choose it later.
 Update:
 
 - `docs/src/development/release-packaging.md`
-- `docs/src/usage/clusterctl.md`
+- `docs/src/quick-start.md`
 - `README.md`
 
 ### 2. Harden Clusterctl Packaging

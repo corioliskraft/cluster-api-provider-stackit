@@ -1,21 +1,27 @@
 # clusterctl
 
 Each release publishes `infrastructure-components.yaml`, `metadata.yaml`, and
-cluster templates as GitHub Release assets. Install a published version with:
+cluster templates as GitHub Release assets.
 
-```sh
-clusterctl init \
-  --infrastructure \
-  https://github.com/stackitcloud/cluster-api-provider-stackit/releases/download/v<version>/infrastructure-components.yaml
+## Install a published release
+
+Create `clusterctl.yaml` with the published release URL. Replace `<version>`
+with the release tag you want to install.
+
+```yaml
+providers:
+  - name: stackit
+    url: https://github.com/stackitcloud/cluster-api-provider-stackit/releases/download/v<version>/infrastructure-components.yaml
+    type: InfrastructureProvider
 ```
 
-Or latest:
+Install the provider:
 
 ```sh
-clusterctl init \
-  --infrastructure \
-  https://github.com/stackitcloud/cluster-api-provider-stackit/releases/download/latest/infrastructure-components.yaml
+clusterctl init --config clusterctl.yaml --infrastructure stackit
 ```
+
+## Use a local provider repository
 
 For local development, package the provider as a local clusterctl repository:
 

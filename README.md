@@ -34,6 +34,24 @@ Please see our [book](https://stackitcloud.github.io/cluster-api-provider-stacki
 
 Use `make serve-book` to serve the book locally from this repository.
 
+## Install with clusterctl
+
+Create `clusterctl.yaml` with the published release URL. Replace `<version>`
+with the release tag you want to install.
+
+```yaml
+providers:
+  - name: stackit
+    url: https://github.com/stackitcloud/cluster-api-provider-stackit/releases/download/v<version>/infrastructure-components.yaml
+    type: InfrastructureProvider
+```
+
+Install the provider:
+
+```sh
+clusterctl init --config clusterctl.yaml --infrastructure stackit
+```
+
 ## Launching a Kubernetes cluster on STACKIT
 
 Check out the [Quick Start](./quick-start.md) for launching a cluster on STACKIT.

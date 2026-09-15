@@ -7,11 +7,11 @@
   - [Classic Cluster Template](usage/cluster-template.md)
   - [ClusterClass](usage/clusterclass.md)
   - [Workload Addons](usage/addons.md)
-  - [clusterctl](usage/clusterctl.md)
   - [Workload CNI](usage/cni.md)
   - [Upgrade](usage/upgrade.md)
   - [Cleanup](usage/cleanup.md)
 -->
+- [clusterctl](usage/clusterctl.md)
 - [Topics](./topics/index.md)
   - [OS Images](./topics/images.md)
   - [Accessing VM instances](./topics/accessing-vm-instances.md)

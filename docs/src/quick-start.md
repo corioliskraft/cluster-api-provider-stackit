@@ -97,14 +97,17 @@ kubectl create secret generic stackit-credentials \
 
 ## Create a workload cluster
 
-Download the template that matches the provider release:
+You can use the cluster template directly from the repository's `templates`
+directory (`templates/cluster-template.yaml`) if you cloned the repository, or
+download the template that matches the provider release:
 
 ```sh
 curl --fail --location --remote-name \
   "https://github.com/stackitcloud/cluster-api-provider-stackit/releases/download/${CAPSTK_VERSION}/cluster-template.yaml"
 ```
 
-Set the cluster values and render the template:
+Set the cluster values and render the template (use
+`--from templates/cluster-template.yaml` if working from a repository clone):
 
 ```sh
 export CLUSTER_NAME=stackit-workload
@@ -129,14 +132,43 @@ Watch the provider create the cluster:
 kubectl get cluster,machine,stackitcluster,stackitmachine --namespace "${NAMESPACE}"
 ```
 
-When the workload API is available, install a CNI, then retrieve the workload
-kubeconfig:
+When the workload API is available, retrieve the workload kubeconfig to install
+a CNI:
 
 ```sh
 clusterctl get kubeconfig "${CLUSTER_NAME}" \
   --namespace "${NAMESPACE}" \
   > "${CLUSTER_NAME}".kubeconfig
 ```
+
+Workload nodes remain in `NotReady` status until a CNI is installed. We provide
+a preconfigured Cilium setup at `templates/addons/cilium-values.yaml` in the
+templates addons directory, and it is also published for each release:
+
+```sh
+curl --fail --location --remote-name \
+  "https://github.com/stackitcloud/cluster-api-provider-stackit/releases/download/${CAPSTK_VERSION}/cilium-values.yaml"
+```
+
+Install Cilium using the Cilium CLI or Helm with these values (or use
+`templates/addons/cilium-values.yaml` directly from a local checkout):
+
+```sh
+cilium install \
+  --kubeconfig "${CLUSTER_NAME}.kubeconfig" \
+  --values cilium-values.yaml
+```
+
+If you are working from a local checkout, you can also use the development
+target in the `Makefile` backed by `hack/install-workload-cni.sh`:
+
+```sh
+make install-workload-cni \
+  WORKLOAD_KUBECONFIG="${CLUSTER_NAME}.kubeconfig"
+```
+
+See [Workload CNI](usage/cni.md) and [Workload Addons](usage/addons.md) for more
+details on CNI options and verification.
 
 Use the [development guide](development/index.md) when you want to build and
 run the provider from a local checkout.

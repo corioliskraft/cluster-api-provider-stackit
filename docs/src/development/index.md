@@ -101,8 +101,41 @@ kubectl rollout status \
 
 The provider is now running from your checkout. Continue with the quick start
 from [set credentials and cluster settings](../quick-start.md#set-credentials-and-cluster-settings).
-Create the Secret in the `default` namespace used there, then continue with
-[create a workload cluster](../quick-start.md#create-a-workload-cluster).
+Create the Secret in the `default` namespace used there, then create the workload
+cluster.
+
+Because you are working from a repository checkout, use
+`templates/cluster-template.yaml` directly instead of downloading a release
+asset:
+
+```sh
+clusterctl generate cluster "${CLUSTER_NAME}" \
+  --from templates/cluster-template.yaml \
+  --target-namespace "${NAMESPACE}" \
+  > cluster.yaml
+kubectl apply -f cluster.yaml
+```
+
+When the workload API is available, retrieve the workload kubeconfig:
+
+```sh
+clusterctl get kubeconfig "${CLUSTER_NAME}" \
+  --namespace "${NAMESPACE}" \
+  > "${CLUSTER_NAME}".kubeconfig
+```
+
+Install a CNI using the repository helper (`hack/install-workload-cni.sh`) via
+`make`:
+
+```sh
+make install-workload-cni \
+  WORKLOAD_KUBECONFIG="${CLUSTER_NAME}.kubeconfig"
+```
+
+By default, this installs Cilium using `templates/addons/cilium-values.yaml`. You
+can also install Calico by setting `STACKIT_WORKLOAD_CNI=calico`, or apply a
+custom manifest by setting `CNI_MANIFEST=path/to/manifest.yaml`. See
+[Workload CNI](../usage/cni.md) for more options.
 
 ## Run the controller on your host
 

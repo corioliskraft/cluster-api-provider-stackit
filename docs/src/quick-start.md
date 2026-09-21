@@ -30,8 +30,36 @@ EOF
 
 ## Create a management cluster
 
+### Enterprise proxies like Zscaler
+
+If your network uses a TLS-intercepting proxy such as Zscaler, the Kind node
+must trust the proxy's root certificate. The host's certificate store does not
+automatically apply inside the Kind node. Create a local `kind-config.yaml`
+that mounts the host CA bundle into the node:
+
+```sh
+cat > kind-config.yaml <<'EOF'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      - hostPath: /etc/ssl/certs/ca-certificates.crt
+        containerPath: /etc/ssl/certs/ca-certificates.crt
+        readOnly: true
+EOF
+kind create cluster --name capi-stackit --config kind-config.yaml
+```
+
+Without such a proxy, create the cluster without the configuration file:
+
 ```sh
 kind create cluster --name capi-stackit
+```
+
+Select the management-cluster context and install the provider:
+
+```sh
 kubectl config use-context kind-capi-stackit
 
 clusterctl init \

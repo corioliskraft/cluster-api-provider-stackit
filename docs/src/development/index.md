@@ -1,71 +1,118 @@
 # Developer Guide
 
-This guide is for contributors working from a local checkout.
+Use this guide to create a local development environment from a fresh checkout.
+It creates a Kind management cluster, installs Cluster API, and runs the
+STACKIT provider image you build from this repository. That management cluster
+then creates workload clusters in STACKIT, so use a project intended for
+development and expect the workload resources to incur cost.
 
-## Run against the current cluster
+## Before you start
 
-Install CRDs into the current cluster:
+Install:
 
-```sh
-make install
-```
+- Go
+- Docker
+- `kind`
+- `kubectl`
+- `clusterctl`
+- `base64`
 
-Run the controller locally against the current kubeconfig context:
+You also need a STACKIT project, a service-account JSON key, an existing
+network, an image, and a machine type. The service account needs the permissions
+listed in [IAM permissions](../topics/iam-permissions.md).
 
-```sh
-make run
-```
+Clone this repository and run the commands below from its root.
 
-Build and deploy the controller image:
+## Create the management cluster
 
-```sh
-export IMG=<registry>/cluster-api-provider-stackit:<tag>
-make docker-build docker-push IMG="$IMG"
-make deploy IMG="$IMG"
-```
+The management cluster runs the Cluster API controllers and the provider. It is
+not the Kubernetes cluster that will run your workload.
 
-For a local kind management cluster, build and load the image instead of pushing it:
+### Enterprise proxies like Zscaler
 
-```sh
-export IMG=cluster-api-provider-stackit:dev
-make docker-build IMG="$IMG"
-kind load docker-image "$IMG" --name capi-stackit
-make deploy IMG="$IMG"
-```
-
-The local development cluster used during validation is `kind-capi-stackit`.
-
-## Use locally built provider assets
-
-Build a local clusterctl repository:
+If your network uses a TLS-intercepting proxy such as Zscaler, the Kind node
+must trust the proxy's root certificate. The host's certificate store does not
+automatically apply inside the Kind node. Create a local `kind-config.yaml`
+that mounts the host CA bundle into the node:
 
 ```sh
-export IMG=cluster-api-provider-stackit:dev
-make clusterctl-release IMG="${IMG}"
-export STACKIT_CLUSTERCTL_REPOSITORY="$(pwd)/dist/clusterctl"
+cat > kind-config.yaml <<'EOF'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      - hostPath: /etc/ssl/certs/ca-certificates.crt
+        containerPath: /etc/ssl/certs/ca-certificates.crt
+        readOnly: true
+EOF
+kind create cluster --name capi-stackit --config kind-config.yaml
 ```
 
-Create a Kind management cluster and install the local provider assets:
+Without such a proxy, create the cluster without the configuration file:
 
 ```sh
 kind create cluster --name capi-stackit
-kubectl config use-context kind-capi-stackit
+```
 
+Point `kubectl` at the new management cluster:
+
+```sh
+kubectl config use-context kind-capi-stackit
+```
+
+## Install Cluster API
+
+Install Cluster API core, bootstrap, and control-plane providers into the management
+cluster:
+
+```sh
 clusterctl init \
   --config hack/clusterctl-local.yaml \
   --core cluster-api \
   --bootstrap kubeadm \
-  --control-plane kubeadm \
-  --infrastructure stackit:v0.1.0
+  --control-plane kubeadm
 ```
 
-Build and load the image, then deploy the controller:
+`hack/clusterctl-local.yaml` enables Cluster API features needed by the
+repository's templates, including ClusterClass and ClusterResourceSet.
+
+## Build and deploy the local provider
+
+Build the controller image, load it into the Kind node, and deploy the
+provider with that image:
 
 ```sh
+export IMG=cluster-api-provider-stackit:dev
 make docker-build IMG="${IMG}"
 kind load docker-image "${IMG}" --name capi-stackit
 make deploy IMG="${IMG}"
 ```
 
-`hack/clusterctl-local.yaml` enables `CLUSTER_TOPOLOGY` so ClusterClass and
-topology clusters can pass the Cluster API admission webhooks.
+Wait until the locally built provider is ready:
+
+```sh
+kubectl rollout status \
+  --namespace cluster-api-provider-stackit-system \
+  deployment/cluster-api-provider-stackit-controller-manager
+```
+
+## Configure STACKIT and create a workload cluster
+
+The provider is now running from your checkout. Continue with the quick start
+from [set credentials and cluster settings](../quick-start.md#set-credentials-and-cluster-settings).
+Create the Secret in the `default` namespace used there, then continue with
+[create a workload cluster](../quick-start.md#create-a-workload-cluster).
+
+## Run the controller on your host
+
+For controller debugging, stop the deployed provider first, keep
+`kind-capi-stackit` as the active kubeconfig context, and run:
+
+```sh
+make undeploy
+make run
+```
+
+`make run` connects to the active management cluster. When you stop it, rebuild,
+load, and deploy the image again with the commands in the previous section.

@@ -15,7 +15,7 @@ build: $(BOOK_DEPS) ## Build the book
 	$(MDBOOK) build .
 
 .PHONY: serve
-serve:
+serve: $(BOOK_DEPS)
 	$(MDBOOK) serve . --open
 
 .PHONY: clean

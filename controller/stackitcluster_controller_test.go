@@ -519,6 +519,7 @@ var _ = Describe("StackitCluster Controller", func() {
 		expectCondition(got.Status.Conditions, infrav1.ClusterCredentialsReadyCondition, metav1.ConditionTrue, "Available")
 	})
 
+	//nolint:dupl // Pause behavior must be verified independently for the cluster reconciler.
 	It("does not call the cloud API when the owning Cluster is paused", func() {
 		cluster := &clusterv1.Cluster{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName, Namespace: namespace}, cluster)).To(Succeed())
